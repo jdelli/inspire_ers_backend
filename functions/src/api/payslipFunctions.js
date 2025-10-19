@@ -1,12 +1,20 @@
 const express = require('express');
 const admin = require('firebase-admin');
-const { authenticateUser, rateLimit, setCorsHeaders, auditLog } = require('../middleware/securityMiddleware');
 
 const router = express.Router();
-router.use(setCorsHeaders);
-router.use(authenticateUser);
-router.use(rateLimit(60, 60_000));
-router.use(auditLog);
+
+// Initialize Firebase Admin if not already initialized
+if (!global.firebaseAdminInitialized) {
+  try {
+    const serviceAccount = require('../../serviceAccountKey.json');
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    global.firebaseAdminInitialized = true;
+  } catch (error) {
+    console.error('Firebase Admin initialization error:', error);
+  }
+}
 
 const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;

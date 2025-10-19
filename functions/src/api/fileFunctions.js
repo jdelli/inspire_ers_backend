@@ -1,13 +1,7 @@
 const express = require('express');
-const { authenticateUser, validateCompanyAccess, rateLimit, setCorsHeaders, auditLog } = require('../middleware/securityMiddleware');
 const admin = require('firebase-admin');
 
 const router = express.Router();
-
-router.use(setCorsHeaders);
-router.use(authenticateUser);
-router.use(rateLimit(60, 60_000));
-router.use(auditLog);
 
 function createServiceError(code, message, status = 500, details) {
   const err = new Error(message);

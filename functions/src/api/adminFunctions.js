@@ -1,12 +1,7 @@
 const express = require('express');
 const admin = require('firebase-admin');
-const { authenticateUser, rateLimit, setCorsHeaders, auditLog } = require('../middleware/securityMiddleware');
 
 const router = express.Router();
-router.use(setCorsHeaders);
-router.use(authenticateUser);
-router.use(rateLimit(60, 60_000));
-router.use(auditLog);
 
 const db = admin.firestore();
 

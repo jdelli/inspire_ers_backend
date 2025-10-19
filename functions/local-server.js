@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 
 // Import all the route modules
+const authFunctions = require('./src/api/authFunctions');
+const firestoreFunctions = require('./src/api/firestoreFunctions');
 const payrollFunctions = require('./src/api/payrollFunctions');
 const commissionFunctions = require('./src/api/commissionFunctions');
 const reportFunctions = require('./src/api/reportFunctions');
@@ -23,6 +25,8 @@ app.use(cors({ origin: true }));
 app.use(express.json());
 
 // Routes (mount under emulator-compatible base path)
+app.use(`${BASE}/auth`, authFunctions);
+app.use(`${BASE}/firestore`, firestoreFunctions);
 app.use(`${BASE}/payroll`, payrollFunctions);
 app.use(`${BASE}/commissions`, commissionFunctions);
 app.use(`${BASE}/reports`, reportFunctions);
@@ -45,6 +49,8 @@ app.listen(PORT, '127.0.0.1', () => {
   console.log(`🚀 Backend server running on http://127.0.0.1:${PORT}`);
   console.log(`📊 Health check: http://127.0.0.1:${PORT}/health`);
   console.log(`📋 Available endpoints:`);
+  console.log(`   - /auth/*`);
+  console.log(`   - /firestore/*`);
   console.log(`   - /payroll/*`);
   console.log(`   - /commissions/*`);
   console.log(`   - /reports/*`);

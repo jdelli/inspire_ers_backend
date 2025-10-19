@@ -1,4 +1,17 @@
-const admin = require('../utils/firebaseAdmin');
+const admin = require('firebase-admin');
+
+// Initialize Firebase Admin if not already initialized
+if (!global.firebaseAdminInitialized) {
+  try {
+    const serviceAccount = require('../../serviceAccountKey.json');
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    global.firebaseAdminInitialized = true;
+  } catch (error) {
+    console.error('Firebase Admin initialization error:', error);
+  }
+}
 
 const firestore = () => {
   if (typeof admin.firestore !== 'function') throw new Error('Firestore is not initialized');
