@@ -1,5 +1,10 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const multer = require('multer');
+const XLSX = require('xlsx');
+
+// Configure multer for file uploads
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Initialize Firebase Admin if not already initialized
 if (!global.firebaseAdminInitialized) {
@@ -106,6 +111,89 @@ router.post('/process', async (req, res) => {
   }
 });
 
+async function processBulkAttendance(attendanceRecords) {
+  const batch = db.batch();
+  let successCount = 0;
+  const errors = [];
+
+  for (const recordData of attendanceRecords) {
+    const { employeeId, date, timeIn, timeOut, companyId, status = 'Present', notes = '' } = recordData;
+
+    if (!employeeId || !date || !companyId) {
+      errors.push({
+        employeeId,
+        date,
+        error: 'Missing required parameters'
+      });
+      continue;
+    }
+
+    try {
+      const employeeDoc = await db.collection('employees').doc(employeeId).get();
+      if (!employeeDoc.exists) {
+        errors.push({
+          employeeId,
+          date,
+          error: 'Employee not found'
+        });
+        continue;
+      }
+
+      const employeeData = employeeDoc.data();
+      const employeeName = `${employeeData.firstName} ${employeeData.lastName}`;
+
+      const timeStatus = calculateTimeStatus(timeIn, timeOut, employeeId);
+
+      const attendanceRecord = {
+        employeeId,
+        employeeName,
+        companyId,
+        date,
+        timeIn: timeIn || null,
+        timeOut: timeOut || null,
+        status,
+        notes,
+        timeStatus: timeStatus.status,
+        timeStatusColor: timeStatus.color,
+        totalMinutesLate: timeStatus.totalMinutesLate || 0,
+        totalEarlyMinutes: timeStatus.totalEarlyMinutes || 0,
+        totalOvertimeMinutes: timeStatus.totalOvertimeMinutes || 0,
+        totalUndertimeMinutes: timeStatus.totalUndertimeMinutes || 0,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      const existingRecordQuery = db.collection('timeRecords')
+        .where('employeeId', '==', employeeId)
+        .where('date', '==', date)
+        .where('companyId', '==', companyId);
+      
+      const existingRecordSnapshot = await existingRecordQuery.get();
+
+      if (!existingRecordSnapshot.empty) {
+        const existingDoc = existingRecordSnapshot.docs[0];
+        batch.update(existingDoc.ref, attendanceRecord);
+      } else {
+        attendanceRecord.createdAt = admin.firestore.FieldValue.serverTimestamp();
+        const newDocRef = db.collection('timeRecords').doc();
+        batch.set(newDocRef, attendanceRecord);
+      }
+
+      successCount++;
+
+    } catch (error) {
+      errors.push({
+        employeeId,
+        date,
+        error: error.message
+      });
+    }
+  }
+
+  await batch.commit();
+
+  return { successCount, errors };
+}
+
 // Bulk process attendance records
 router.post('/bulk-process', async (req, res) => {
   try {
@@ -120,99 +208,17 @@ router.post('/bulk-process', async (req, res) => {
       });
     }
 
-    const batch = db.batch();
-    const results = [];
-
-    for (const recordData of attendanceRecords) {
-      const { employeeId, date, timeIn, timeOut, companyId, status = 'Present', notes = '' } = recordData;
-
-      if (!employeeId || !date || !companyId) {
-        results.push({
-          employeeId,
-          date,
-          success: false,
-          error: 'Missing required parameters'
-        });
-        continue;
-      }
-
-      try {
-        // Get employee info
-        const employeeDoc = await db.collection('employees').doc(employeeId).get();
-        if (!employeeDoc.exists) {
-          results.push({
-            employeeId,
-            date,
-            success: false,
-            error: 'Employee not found'
-          });
-          continue;
-        }
-
-        const employeeData = employeeDoc.data();
-        const employeeName = `${employeeData.firstName} ${employeeData.lastName}`;
-
-        // Calculate time status
-        const timeStatus = calculateTimeStatus(timeIn, timeOut, employeeId);
-
-        // Create attendance record
-        const attendanceRecord = {
-          employeeId,
-          employeeName,
-          companyId,
-          date,
-          timeIn: timeIn || null,
-          timeOut: timeOut || null,
-          status,
-          notes,
-          timeStatus: timeStatus.status,
-          timeStatusColor: timeStatus.color,
-          totalMinutesLate: timeStatus.totalMinutesLate || 0,
-          totalEarlyMinutes: timeStatus.totalEarlyMinutes || 0,
-          totalOvertimeMinutes: timeStatus.totalOvertimeMinutes || 0,
-          totalUndertimeMinutes: timeStatus.totalUndertimeMinutes || 0,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        };
-
-        // Add to batch
-        const docRef = db.collection('timeRecords').doc();
-        batch.set(docRef, attendanceRecord);
-
-        results.push({
-          employeeId,
-          date,
-          success: true,
-          recordId: docRef.id
-        });
-
-      } catch (error) {
-        results.push({
-          employeeId,
-          date,
-          success: false,
-          error: error.message
-        });
-      }
-    }
-
-    // Commit batch
-    await batch.commit();
-
-    const successCount = results.filter(r => r.success).length;
-    const failureCount = results.filter(r => !r.success).length;
-
-    console.log(`✅ Bulk processing completed: ${successCount} success, ${failureCount} failures`);
+    const { successCount, errors } = await processBulkAttendance(attendanceRecords);
 
     res.json({
       success: true,
-      results,
       summary: {
         total: attendanceRecords.length,
         success: successCount,
-        failures: failureCount
+        failures: errors.length
       },
-      message: `Processed ${successCount}/${attendanceRecords.length} records successfully`
+      message: `Processed ${successCount}/${attendanceRecords.length} records successfully`,
+      errors: errors
     });
 
   } catch (error) {
@@ -238,23 +244,46 @@ router.get('/records', async (req, res) => {
       });
     }
 
-    let query = db.collection('timeRecords').where('companyId', '==', companyId);
+    // Query both collections for compatibility
+    const timeRecordsQuery = db.collection('timeRecords').where('companyId', '==', companyId);
+    const attendanceQuery = db.collection('attendance').where('companyId', '==', companyId);
+
+    // Apply filters
+    let timeQuery = timeRecordsQuery;
+    let attQuery = attendanceQuery;
 
     if (employeeId) {
-      query = query.where('employeeId', '==', employeeId);
+      timeQuery = timeQuery.where('employeeId', '==', employeeId);
+      attQuery = attQuery.where('employeeId', '==', employeeId);
     }
 
     if (date) {
-      query = query.where('date', '==', date);
+      timeQuery = timeQuery.where('date', '==', date);
+      attQuery = attQuery.where('date', '==', date);
     }
 
-    const snapshot = await query.get();
-    console.log(`📊 Found ${snapshot.docs.length} records`);
+    // Fetch from both collections
+    const [timeSnapshot, attSnapshot] = await Promise.all([
+      timeQuery.get(),
+      attQuery.get()
+    ]);
 
-    const records = snapshot.docs.map(doc => ({
+    console.log(`📊 Found ${timeSnapshot.docs.length} records in timeRecords, ${attSnapshot.docs.length} in attendance`);
+
+    const timeRecords = timeSnapshot.docs.map(doc => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
+      _source: 'timeRecords'
     }));
+
+    const attRecords = attSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      _source: 'attendance'
+    }));
+
+    // Combine records from both collections
+    const records = [...timeRecords, ...attRecords];
 
     // Filter by date range if specified
     let filteredRecords = records;
@@ -1129,3 +1158,148 @@ router.delete('/deleteAttendanceSummaries', async (req, res) => {
 });
 
 module.exports = router;
+
+// Helper function to parse Excel/CSV and extract attendance records
+async function parseAttendanceFile(fileBuffer, companyId) {
+  try {
+    const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    
+    // Get headers and normalize them
+    const headers = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
+    console.log('File headers found:', headers);
+
+    const normalizedHeaders = headers.reduce((acc, header) => {
+      const normalized = header.trim().toLowerCase();
+      acc[normalized] = header;
+      return acc;
+    }, {});
+
+    const headerMapping = {
+      employeeId: normalizedHeaders['employee id'],
+      employeeName: normalizedHeaders['employee name'],
+      department: normalizedHeaders['department'],
+      position: normalizedHeaders['position'],
+      date: normalizedHeaders['date'],
+      status: normalizedHeaders['status'],
+      timeIn: normalizedHeaders['time in'],
+      timeOut: normalizedHeaders['time out'],
+      notes: normalizedHeaders['notes'],
+    };
+
+    if (!headerMapping.employeeId || !headerMapping.date) {
+      throw new Error('Missing required columns. Ensure "Employee ID" and "Date" columns exist.');
+    }
+
+    const jsonData = XLSX.utils.sheet_to_json(sheet);
+
+    const records = jsonData.map((row, index) => {
+      const employeeId = row[headerMapping.employeeId];
+      if (!employeeId) {
+        console.warn(`Skipping row ${index + 2} due to missing Employee ID.`);
+        return null;
+      }
+
+      let date = row[headerMapping.date];
+      try {
+        if (date instanceof Date) {
+          // Format date to YYYY-MM-DD
+          date = date.toISOString().slice(0, 10);
+        } else {
+          // Handle numeric Excel dates
+          const excelDate = Number(date);
+          if (!isNaN(excelDate)) {
+            date = new Date(Math.round((excelDate - 25569) * 86400 * 1000)).toISOString().slice(0, 10);
+          } else if (typeof date === 'string' && /\d{4}-\d{2}-\d{2}/.test(date)) {
+            // Date is already in the correct format
+          } else {
+            throw new Error(`Invalid date format in row ${index + 2}. Expected YYYY-MM-DD or Excel date format.`);
+          }
+        }
+      } catch (e) {
+        console.error(`Error parsing date in row ${index + 2}:`, e);
+        throw new Error(`Error parsing date in row ${index + 2}. Please use YYYY-MM-DD format.`);
+      }
+
+      return {
+        employeeId: String(employeeId),
+        employeeName: row[headerMapping.employeeName] || '',
+        department: row[headerMapping.department] || '',
+        position: row[headerMapping.position] || '',
+        date: date,
+        status: row[headerMapping.status] || 'Present',
+        timeIn: row[headerMapping.timeIn] || '',
+        timeOut: row[headerMapping.timeOut] || '',
+        notes: row[headerMapping.notes] || '',
+        companyId: companyId,
+      };
+    }).filter(record => record !== null);
+
+    return records;
+  } catch (error) {
+    console.error('Error parsing attendance file:', error);
+    throw new Error('Failed to parse the uploaded file. Please check the file format and column headers.');
+  }
+}
+
+// Import attendance data from CSV/XLSX file
+router.post('/import', upload.single('file'), async (req, res) => {
+  try {
+    const { companyId } = req.body;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded.' });
+    }
+    if (!companyId) {
+      return res.status(400).json({ success: false, error: 'Missing companyId.' });
+    }
+
+    const records = await parseAttendanceFile(file.buffer, companyId);
+
+    const { successCount, errors } = await processBulkAttendance(records);
+
+    res.json({
+      success: true,
+      message: `Successfully imported ${successCount} attendance records.`,
+      importedCount: successCount,
+      errors: errors,
+    });
+
+  } catch (error) {
+    console.error('❌ Error importing attendance data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Upload biometric data from Excel file
+router.post('/biometric-upload', upload.single('file'), async (req, res) => {
+  try {
+    const { companyId } = req.body;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded.' });
+    }
+    if (!companyId) {
+      return res.status(400).json({ success: false, error: 'Missing companyId.' });
+    }
+
+    // Assuming biometric data has a similar structure for now, or can be adapted
+    const records = await parseAttendanceFile(file.buffer, companyId); // Re-using for now
+
+    const { successCount, errors } = await processBulkAttendance(records);
+
+    res.json({
+      success: true,
+      message: `Successfully uploaded ${successCount} biometric records.`,
+      uploadedCount: successCount,
+      errors: errors,
+    });
+
+  } catch (error) {
+    console.error('❌ Error uploading biometric data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});

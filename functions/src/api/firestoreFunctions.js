@@ -207,8 +207,8 @@ router.post('/set', async (req, res) => {
 router.post('/update', async (req, res) => {
   try {
     const { collection, id, data } = req.body;
-    
-    console.log('🔍 Firestore updateDoc:', { collection, id });
+
+    console.log('🔍 Firestore updateDoc:', { collection, id, data });
 
     if (!collection || !id || !data) {
       return res.status(400).json({
@@ -217,10 +217,24 @@ router.post('/update', async (req, res) => {
       });
     }
 
-    const docRef = db.collection(collection).doc(id);
-    await docRef.update(data);
+    // Convert date strings to Firestore Timestamps
+    const processedData = { ...data };
+    for (const [key, value] of Object.entries(processedData)) {
+      if (value && typeof value === 'string') {
+        // Check if it's an ISO date string
+        const dateRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+        if (dateRegex.test(value)) {
+          processedData[key] = admin.firestore.Timestamp.fromDate(new Date(value));
+        }
+      } else if (value instanceof Date) {
+        processedData[key] = admin.firestore.Timestamp.fromDate(value);
+      }
+    }
 
-    console.log(`✅ Document updated with ID: ${id}`);
+    const docRef = db.collection(collection).doc(id);
+    await docRef.update(processedData);
+
+    console.log(`✅ Document updated with ID: ${id}`, processedData);
 
     res.json({
       success: true,

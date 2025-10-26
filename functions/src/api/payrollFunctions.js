@@ -262,6 +262,7 @@ router.post('/delete-period', async (req, res) => {
     if (snapshot.docs.length === 0) {
       return res.json({
         success: true,
+        deleted: 0,
         message: 'No payroll records found for the specified period'
       });
     }
@@ -277,6 +278,7 @@ router.post('/delete-period', async (req, res) => {
 
     res.json({
       success: true,
+      deleted: snapshot.docs.length,
       message: `Deleted ${snapshot.docs.length} payroll records for the period`
     });
 
