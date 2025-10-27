@@ -1,14 +1,19 @@
 {
   "name": "functions",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "INSPIRE-ERS backend functions (Express server for local/prod)",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
+    "dev": "node local-server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
     "@mui/icons-material": "^7.3.4",
     "bcryptjs": "^3.0.2",
