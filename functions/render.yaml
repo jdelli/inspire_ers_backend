@@ -1,0 +1,18 @@
+services:
+  # INSPIRE-ERS Backend API
+  - type: web
+    name: inspire-ers-backend
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        generateValue: true
+      # Add your Firebase credentials as environment variables
+      # Go to Render Dashboard > Environment > Add Secret Files
+      # Upload your serviceAccountKey.json content as GOOGLE_APPLICATION_CREDENTIALS
+    healthCheckPath: /health

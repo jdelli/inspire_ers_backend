@@ -17,7 +17,7 @@ const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
 const adminFunctions = require('./src/api/adminFunctions');
 
 const app = express();
-const PORT = 5001;
+const PORT = process.env.PORT || 5001; // Use environment PORT for deployment
 const BASE = '/inspire-ers/us-central1/api';
 
 // Middleware
@@ -41,56 +41,52 @@ app.use(`${BASE}/payslips`, payslipFunctions);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Backend server is running' });
+  res.json({ 
+    status: 'OK', 
+    message: 'Backend server is running',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    name: 'INSPIRE-ERS API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: {
+      health: '/health',
+      api: BASE
+    }
+  });
 });
 
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
-  const os = require('os');
-  const networkInterfaces = os.networkInterfaces();
-  let localIP = '127.0.0.1';
-
-  // Find the local network IP address
-  // Prioritize standard network ranges (192.168.x.x, 10.x.x.x) over virtual adapters
-  const candidates = [];
-  for (const interfaceName in networkInterfaces) {
-    for (const iface of networkInterfaces[interfaceName]) {
-      // Skip internal and non-IPv4 addresses
-      if (iface.family === 'IPv4' && !iface.internal) {
-        candidates.push(iface.address);
-      }
-    }
-  }
-
-  // Prioritize 192.168.x.x and 10.x.x.x ranges (typical home/office networks)
-  const preferredIP = candidates.find(ip => ip.startsWith('192.168.') || ip.startsWith('10.'));
-  localIP = preferredIP || candidates[0] || '127.0.0.1';
-
-  console.log(`🚀 Backend server running and accessible at:`);
-  console.log(`   Local:   http://127.0.0.1:${PORT}`);
-  console.log(`   Network: http://${localIP}:${PORT}`);
-  console.log(`\n📊 Health check: http://${localIP}:${PORT}/health`);
-  console.log(`\n📋 API Base URL for clients:`);
-  console.log(`   http://${localIP}:${PORT}${BASE}`);
-  console.log(`\n📋 Available endpoints:`);
-  console.log(`   - ${BASE}/auth/*`);
-  console.log(`   - ${BASE}/firestore/*`);
-  console.log(`   - ${BASE}/payroll/*`);
-  console.log(`   - ${BASE}/commissions/*`);
-  console.log(`   - ${BASE}/reports/*`);
-  console.log(`   - ${BASE}/employee-mgmt/*`);
-  console.log(`   - ${BASE}/attendance/*`);
-  console.log(`   - ${BASE}/employees/*`);
-  console.log(`\n⚠️  Configure firewall to allow port ${PORT} if needed`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 INSPIRE-ERS Backend Server`);
+  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`   Port: ${PORT}`);
+  console.log(`   API Base: ${BASE}`);
+  console.log(`   Health Check: /health`);
+  console.log(`✅ Server is ready!`);
 });
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n🛑 Shutting down server...');
-  process.exit(0);
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
 });
 
 process.on('SIGTERM', () => {
   console.log('\n🛑 Shutting down server...');
-  process.exit(0);
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
 });
+
+module.exports = app; // Export for testing

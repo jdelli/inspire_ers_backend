@@ -160,7 +160,8 @@ router.post('/login', async (req, res) => {
           companies: userData.companies,
           status: userData.status,
           activationCode: userData.activationCode,
-          activationCodeExpiry: userData.activationCodeExpiry
+          activationCodeExpiry: userData.activationCodeExpiry,
+          specialrole: userData.specialrole
         }
       });
 
@@ -253,7 +254,8 @@ router.post('/verify', async (req, res) => {
         role: userData.role,
         name: userData.name,
         companies: userData.companies,
-        status: userData.status
+        status: userData.status,
+        specialrole: userData.specialrole
       }
     });
 

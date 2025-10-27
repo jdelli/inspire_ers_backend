@@ -17,6 +17,7 @@ const taxService = require('./src/services/taxService');
 const payrollService = require('./src/services/payrollService');
 const commissionService = require('./src/services/commissionService');
 const thirteenthMonthService = require('./src/services/thirteenthMonthService');
+const { requirePayrollAccess } = require('./src/middleware/payrollAuth');
 
 const app = express();
 
@@ -24,7 +25,11 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-app.use('/payroll', payrollFunctions);
+// Apply payroll authorization middleware to payroll routes
+app.use('/payroll', requirePayrollAccess, payrollFunctions);
+app.use('/trainee-payroll', requirePayrollAccess, traineePayrollFunctions);
+
+// Other routes remain unprotected
 app.use('/commissions', commissionFunctions);
 app.use('/reports', reportFunctions);
 app.use('/reports/v4', reportFunctionsPhase4);
@@ -33,7 +38,6 @@ app.use('/attendance', attendanceFunctions);
 app.use('/employees', employeeFunctions);
 app.use('/files', fileFunctions);
 app.use('/payslips', payslipFunctions);
-app.use('/trainee-payroll', traineePayrollFunctions);
 app.use('/admin', adminFunctions);
 
 exports.api = functions.https.onRequest(app);
@@ -116,6 +120,14 @@ exports.calculatePayroll = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('unauthenticated', 'Authentication is required.');
   }
 
+  // Check if user has superadmin role for payroll access
+  const admin = require('firebase-admin');
+  const userDoc = await admin.firestore().collection('users').doc(context.auth.uid).get();
+  
+  if (!userDoc.exists || userDoc.data().specialrole !== 'superadmin') {
+    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to access payroll data. Super Admin privileges required.');
+  }
+
   const payload = data || {};
   if (!payload.companyId && context.auth.token?.companyId) {
     payload.companyId = context.auth.token.companyId;
@@ -137,6 +149,14 @@ exports.calculatePayroll = functions.https.onCall(async (data, context) => {
 exports.bulkCalculatePayroll = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Authentication is required.');
+  }
+
+  // Check if user has superadmin role for payroll access
+  const admin = require('firebase-admin');
+  const userDoc = await admin.firestore().collection('users').doc(context.auth.uid).get();
+  
+  if (!userDoc.exists || userDoc.data().specialrole !== 'superadmin') {
+    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to access payroll data. Super Admin privileges required.');
   }
 
   const payload = data || {};
