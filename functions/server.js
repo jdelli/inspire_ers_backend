@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 
-// Import all the route modules
+// Import route modules
 const authFunctions = require('./src/api/authFunctions');
 const firestoreFunctions = require('./src/api/firestoreFunctions');
 const payrollFunctions = require('./src/api/payrollFunctions');
@@ -17,14 +17,16 @@ const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
 const adminFunctions = require('./src/api/adminFunctions');
 
 const app = express();
-const PORT = process.env.PORT || 5001; // Use environment PORT for deployment
+const PORT = process.env.PORT || 5001;
+// Keep the same base path used throughout the project/docs
 const BASE = '/inspire-ers/us-central1/api';
 
 // Middleware
 app.use(cors({ origin: true }));
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
-// Routes (mount under emulator-compatible base path)
+// Mount routes
 app.use(`${BASE}/auth`, authFunctions);
 app.use(`${BASE}/firestore`, firestoreFunctions);
 app.use(`${BASE}/payroll`, payrollFunctions);
@@ -39,54 +41,26 @@ app.use(`${BASE}/trainee-payroll`, traineePayrollFunctions);
 app.use(`${BASE}/admin`, adminFunctions);
 app.use(`${BASE}/payslips`, payslipFunctions);
 
-// Health check endpoint
+// Health check for Render
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Backend server is running',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({
-    name: 'INSPIRE-ERS API',
-    version: '1.0.0',
-    status: 'running',
-    endpoints: {
-      health: '/health',
-      api: BASE
-    }
-  });
+  res.json({ status: 'OK', message: 'Backend server is running' });
 });
 
 // Start server
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 INSPIRE-ERS Backend Server`);
-  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   Port: ${PORT}`);
-  console.log(`   API Base: ${BASE}`);
-  console.log(`   Health Check: /health`);
-  console.log(`✅ Server is ready!`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Backend is listening on port ${PORT}`);
+  console.log(`Health check: GET /health`);
+  console.log(`API base: ${BASE}`);
 });
 
-// Handle graceful shutdown
+// Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down server...');
-  server.close(() => {
-    console.log('✅ Server closed');
-    process.exit(0);
-  });
+  console.log('Shutting down server...');
+  process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n🛑 Shutting down server...');
-  server.close(() => {
-    console.log('✅ Server closed');
-    process.exit(0);
-  });
+  console.log('Shutting down server...');
+  process.exit(0);
 });
 
-module.exports = app; // Export for testing

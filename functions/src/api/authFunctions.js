@@ -1,21 +1,10 @@
 const express = require('express');
-const admin = require('firebase-admin');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const initializeFirebaseAdmin = require('../config/firebase');
 
-// Initialize Firebase Admin if not already initialized
-if (!global.firebaseAdminInitialized) {
-  try {
-    const serviceAccount = require('../../serviceAccountKey.json');
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    global.firebaseAdminInitialized = true;
-  } catch (error) {
-    console.error('Firebase Admin initialization error:', error);
-  }
-}
-
+// Initialize Firebase Admin
+const admin = initializeFirebaseAdmin();
 const db = admin.firestore();
 const router = express.Router();
 

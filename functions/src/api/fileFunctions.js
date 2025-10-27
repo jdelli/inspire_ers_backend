@@ -1,7 +1,10 @@
 const express = require('express');
-const admin = require('firebase-admin');
+const initializeFirebaseAdmin = require('../config/firebase');
 
 const router = express.Router();
+
+// Initialize Firebase Admin
+const admin = initializeFirebaseAdmin();
 
 function createServiceError(code, message, status = 500, details) {
   const err = new Error(message);

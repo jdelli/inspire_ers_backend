@@ -1,23 +1,13 @@
 const express = require('express');
-const admin = require('firebase-admin');
+const initializeFirebaseAdmin = require('../config/firebase');
 const multer = require('multer');
 const XLSX = require('xlsx');
 
 // Configure multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Initialize Firebase Admin if not already initialized
-if (!global.firebaseAdminInitialized) {
-  try {
-    const serviceAccount = require('../../serviceAccountKey.json');
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    global.firebaseAdminInitialized = true;
-  } catch (error) {
-    console.error('Firebase Admin initialization error:', error);
-  }
-}
+// Initialize Firebase Admin
+const admin = initializeFirebaseAdmin();
 
 const db = admin.firestore();
 const router = express.Router();

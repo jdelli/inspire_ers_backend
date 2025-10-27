@@ -1,7 +1,9 @@
 const express = require('express');
-const admin = require('firebase-admin');
+const initializeFirebaseAdmin = require('../config/firebase');
 const router = express.Router();
 
+// Initialize Firebase Admin
+const admin = initializeFirebaseAdmin();
 // Initialize Firestore
 const db = admin.firestore();
 
