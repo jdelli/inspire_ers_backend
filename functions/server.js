@@ -22,7 +22,20 @@ const PORT = process.env.PORT || 5001;
 const BASE = '/inspire-ers/us-central1/api';
 
 // Middleware
-app.use(cors({ origin: true }));
+// CORS for production: allow all web origins (frontend runs on Vercel)
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // In Render, we can safely reflect the origin; optionally lock down to your Vercel domains
+      callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    optionsSuccessStatus: 204,
+  })
+);
+app.options('*', cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 

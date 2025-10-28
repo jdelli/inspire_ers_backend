@@ -21,7 +21,30 @@ const PORT = 5001;
 const BASE = '/inspire-ers/us-central1/api';
 
 // Middleware
-app.use(cors({ origin: true }));
+// Robust CORS for local testing across localhost and LAN IPs
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow all origins in local dev; reflect the request origin if present
+      callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  })
+);
+// Preflight handler compatible with Express 5/path-to-regexp v6
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Vary', 'Origin');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 app.use(express.json());
 
 // Routes (mount under emulator-compatible base path)
