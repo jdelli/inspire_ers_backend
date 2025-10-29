@@ -6,6 +6,90 @@ const admin = initializeFirebaseAdmin();
 const db = admin.firestore();
 const router = express.Router();
 
+const NUMERIC_FIELDS = [
+  'workingDays',
+  'basicPay',
+  'allowance',
+  'transpoAllowance',
+  'otPay',
+  'grossPay',
+  'mins',
+  'absent',
+  'halfDay',
+  'otMinutes',
+  'undertimeMinutes',
+  'refreshment',
+  'cashAdvance',
+  'memo',
+  'totalLate',
+  'totalUndertime',
+  'absentValue',
+  'halfDayValue',
+  'totalAbsent',
+  'totalDeductions',
+  'dailyRate',
+  'perHour',
+  'perMinute',
+  'sssEmployee',
+  'sssEmployer',
+  'pagibigEmployee',
+  'pagibigEmployer',
+  'philhealthEmployee',
+  'philhealthEmployer',
+  'birTax',
+  'totalTaxDeductions',
+  'totalEmployerContributions',
+  'netPay',
+];
+
+const REQUIRED_PAYROLL_FIELDS = [
+  'companyId',
+  'employeeId',
+  'payrollKey',
+  'payDate',
+  'cutoffStartDate',
+  'cutoffEndDate',
+];
+
+const sanitizePayrollRecord = (payload = {}) => {
+  if (!payload || typeof payload !== 'object') {
+    return {};
+  }
+
+  const sanitized = {};
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined) {
+      continue;
+    }
+
+    if (NUMERIC_FIELDS.includes(key)) {
+      const numericValue = Number(value);
+      sanitized[key] = Number.isFinite(numericValue) ? numericValue : 0;
+      continue;
+    }
+
+    if (key === 'includeTaxes') {
+      sanitized[key] = Boolean(value);
+      continue;
+    }
+
+    if (
+      key === 'payDate' ||
+      key === 'cutoffStartDate' ||
+      key === 'cutoffEndDate' ||
+      key === 'month'
+    ) {
+      sanitized[key] = value ? String(value).trim() : '';
+      continue;
+    }
+
+    sanitized[key] = value;
+  }
+
+  return sanitized;
+};
+
 // Calculate payroll for a single employee
 router.post('/calculate', async (req, res) => {
   try {
@@ -217,6 +301,76 @@ router.post('/bulk', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// Save (or update) a payroll record computed on the client
+router.post('/save-record', async (req, res) => {
+  try {
+    const { payroll } = req.body || {};
+
+    if (!payroll || typeof payroll !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing payroll payload',
+      });
+    }
+
+    const sanitized = sanitizePayrollRecord(payroll);
+    const missing = REQUIRED_PAYROLL_FIELDS.filter(
+      (field) => !sanitized[field] || sanitized[field] === ''
+    );
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Missing required payroll fields: ${missing.join(', ')}`,
+      });
+    }
+
+    const docRef = db.collection('payrolls').doc(String(sanitized.payrollKey));
+
+    let existingCreatedAt = null;
+    try {
+      const existingSnapshot = await docRef.get();
+      if (existingSnapshot.exists) {
+        const data = existingSnapshot.data();
+        existingCreatedAt =
+          data?.createdAt ||
+          data?.created_at ||
+          admin.firestore.FieldValue.serverTimestamp();
+      }
+    } catch (readError) {
+      console.warn('Unable to read existing payroll metadata:', readError);
+    }
+
+    await docRef.set(
+      {
+        ...sanitized,
+        createdAt:
+          existingCreatedAt || admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    const savedSnapshot = await docRef.get();
+    const savedData = savedSnapshot.exists ? savedSnapshot.data() : sanitized;
+
+    res.json({
+      success: true,
+      payroll: {
+        id: savedSnapshot.id,
+        ...savedData,
+      },
+      message: 'Payroll record saved successfully',
+    });
+  } catch (error) {
+    console.error('Error saving payroll record:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to save payroll record',
     });
   }
 });
