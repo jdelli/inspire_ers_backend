@@ -16,15 +16,31 @@ const fileFunctions = require('./src/api/fileFunctions');
 const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
 const adminFunctions = require('./src/api/adminFunctions');
 
+console.log('Loading audit functions...');
+const auditFunctions = require('./src/api/auditFunctions');
+console.log('Audit functions loaded:', typeof auditFunctions, auditFunctions.stack ? 'Router object' : 'Unknown');
+
 const app = express();
 const PORT = 5001;
 const BASE = '/inspire-ers/us-central1/api';
 
 // Middleware
+// Request logger for debugging
+app.use((req, res, next) => {
+  console.log('\n🔔 [SERVER] Incoming Request:');
+  console.log('  📍 Method:', req.method);
+  console.log('  🌐 URL:', req.url);
+  console.log('  🌍 Origin:', req.headers.origin || 'No Origin Header');
+  console.log('  🔑 Content-Type:', req.headers['content-type'] || 'None');
+  console.log('  📱 User-Agent:', req.headers['user-agent'] ? 'Present' : 'None');
+  next();
+});
+
 // Robust CORS for local testing across localhost and LAN IPs
 app.use(
   cors({
     origin: (origin, callback) => {
+      console.log('🔐 [CORS Middleware] Checking origin:', origin || 'No origin');
       // Allow all origins in local dev; reflect the request origin if present
       callback(null, true);
     },
@@ -35,12 +51,15 @@ app.use(
 );
 // Preflight handler compatible with Express 5/path-to-regexp v6
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  const originHeader = req.headers.origin || '*';
+  console.log('🔓 [CORS Headers] Setting Access-Control-Allow-Origin:', originHeader);
+  res.header('Access-Control-Allow-Origin', originHeader);
   res.header('Vary', 'Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   if (req.method === 'OPTIONS') {
+    console.log('✅ [CORS] Responding to OPTIONS preflight');
     return res.sendStatus(204);
   }
   next();
@@ -61,6 +80,37 @@ app.use(`${BASE}/files`, fileFunctions);
 app.use(`${BASE}/trainee-payroll`, traineePayrollFunctions);
 app.use(`${BASE}/admin`, adminFunctions);
 app.use(`${BASE}/payslips`, payslipFunctions);
+
+console.log('Mounting audit routes at:', `${BASE}/audit`);
+app.use(`${BASE}/audit`, (req, res, next) => {
+  console.log('Audit route hit:', req.method, req.path, req.url);
+  next();
+}, auditFunctions);
+console.log('Audit routes mounted successfully');
+
+// Debug route to list all registered routes
+app.get('/debug/routes', (req, res) => {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push({
+        path: middleware.route.path,
+        methods: Object.keys(middleware.route.methods)
+      });
+    } else if (middleware.name === 'router' && middleware.handle.stack) {
+      const basePath = middleware.regexp.source.replace(/\\\//g, '/').replace(/\^/g, '').replace(/\$/g, '').replace(/\?\(\?\=\/\|\$\)/g, '');
+      middleware.handle.stack.forEach((handler) => {
+        if (handler.route) {
+          routes.push({
+            path: basePath + handler.route.path,
+            methods: Object.keys(handler.route.methods)
+          });
+        }
+      });
+    }
+  });
+  res.json({ routes });
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {

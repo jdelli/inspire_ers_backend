@@ -15,6 +15,7 @@ const payslipFunctions = require('./src/api/payslipFunctions');
 const fileFunctions = require('./src/api/fileFunctions');
 const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
 const adminFunctions = require('./src/api/adminFunctions');
+const auditFunctions = require('./src/api/auditFunctions');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -22,10 +23,21 @@ const PORT = process.env.PORT || 5001;
 const BASE = '/inspire-ers/us-central1/api';
 
 // Middleware
+// Request logger for debugging
+app.use((req, res, next) => {
+  console.log('\n🔔 [SERVER] Incoming Request:');
+  console.log('  📍 Method:', req.method);
+  console.log('  🌐 URL:', req.url);
+  console.log('  🌍 Origin:', req.headers.origin || 'No Origin');
+  console.log('  🔑 Headers:', JSON.stringify(req.headers, null, 2));
+  next();
+});
+
 // CORS for production: allow all web origins (frontend runs on Vercel)
 app.use(
   cors({
     origin: (origin, callback) => {
+      console.log('🔐 [CORS] Checking origin:', origin);
       // In Render, we can safely reflect the origin; optionally lock down to your Vercel domains
       callback(null, true);
     },
@@ -53,6 +65,7 @@ app.use(`${BASE}/files`, fileFunctions);
 app.use(`${BASE}/trainee-payroll`, traineePayrollFunctions);
 app.use(`${BASE}/admin`, adminFunctions);
 app.use(`${BASE}/payslips`, payslipFunctions);
+app.use(`${BASE}/audit`, auditFunctions);
 
 // Health check for Render
 app.get('/health', (req, res) => {

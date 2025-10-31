@@ -10,6 +10,7 @@ const employeeFunctions = require('./src/api/employeeFunctions');
 const employeeManagementFunctions = require('./src/api/employeeManagementFunctions');
 const attendanceFunctions = require('./src/api/attendanceFunctions');
 const fileFunctions = require('./src/api/fileFunctions');
+const auditFunctions = require('./src/api/auditFunctions');
 const payslipFunctions = require('./src/api/payslipFunctions');
 const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
 const adminFunctions = require('./src/api/adminFunctions');
@@ -18,6 +19,7 @@ const payrollService = require('./src/services/payrollService');
 const commissionService = require('./src/services/commissionService');
 const thirteenthMonthService = require('./src/services/thirteenthMonthService');
 const { requirePayrollAccess } = require('./src/middleware/payrollAuth');
+const { requireAuditAccess } = require('./src/middleware/auditAuth');
 
 const app = express();
 
@@ -37,6 +39,7 @@ app.use('/employee-mgmt', employeeManagementFunctions);
 app.use('/attendance', attendanceFunctions);
 app.use('/employees', employeeFunctions);
 app.use('/files', fileFunctions);
+app.use('/audit', requireAuditAccess, auditFunctions);
 app.use('/payslips', payslipFunctions);
 app.use('/admin', adminFunctions);
 
