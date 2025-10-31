@@ -591,17 +591,17 @@ const listIncidentReports = async ({ companyId, status, limit = 200 }) => {
     const db = firestore();
     let query = db.collectionGroup('incidentReports');
 
+    // Only apply companyId filter at query level to avoid needing composite index
     if (companyId) {
       query = query.where('companyId', '==', companyId);
     }
 
-    if (status && status !== 'all') {
-      query = query.where('status', '==', status);
-    }
+    // Order by createdAt - this works with single where clause
+    query = query.orderBy('createdAt', 'desc').limit(Math.min(limit, 500));
 
-    const snapshot = await query.orderBy('createdAt', 'desc').limit(Math.min(limit, 500)).get();
+    const snapshot = await query.get();
 
-    const incidents = snapshot.docs.map((doc) => {
+    let incidents = snapshot.docs.map((doc) => {
       const data = doc.data();
       const normalized = normalizeIncidentDoc({ id: doc.id, ...data });
       return {
@@ -612,6 +612,11 @@ const listIncidentReports = async ({ companyId, status, limit = 200 }) => {
         entityDepartment: data.entityDepartment || null,
       };
     });
+
+    // Filter by status in memory to avoid composite index requirement
+    if (status && status !== 'all') {
+      incidents = incidents.filter(incident => incident.status === status);
+    }
 
     return {
       success: true,
