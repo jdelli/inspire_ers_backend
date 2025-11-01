@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { attachRequestContext, requireAuthenticatedUser } = require('./src/middleware/requestContext');
 
 // Import route modules
 const authFunctions = require('./src/api/authFunctions');
@@ -8,6 +9,7 @@ const payrollFunctions = require('./src/api/payrollFunctions');
 const commissionFunctions = require('./src/api/commissionFunctions');
 const reportFunctions = require('./src/api/reportFunctions');
 const reportFunctionsPhase4 = require('./src/api/reportFunctionsPhase4');
+const activityFunctions = require('./src/api/activityFunctions');
 const employeeFunctions = require('./src/api/employeeFunctions');
 const employeeManagementFunctions = require('./src/api/employeeManagementFunctions');
 const attendanceFunctions = require('./src/api/attendanceFunctions');
@@ -50,6 +52,8 @@ app.use(
 );
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+// Attach request context (auth parsing, requestId, IPs, etc.)
+app.use(attachRequestContext);
 
 // Mount routes
 app.use(`${BASE}/auth`, authFunctions);
@@ -58,6 +62,8 @@ app.use(`${BASE}/payroll`, payrollFunctions);
 app.use(`${BASE}/commissions`, commissionFunctions);
 app.use(`${BASE}/reports`, reportFunctions);
 app.use(`${BASE}/reports/v4`, reportFunctionsPhase4);
+// Protect activity routes and ensure req.user is available, matching Firebase/index and local-server
+app.use(`${BASE}/activity`, requireAuthenticatedUser, activityFunctions);
 app.use(`${BASE}/employee-mgmt`, employeeManagementFunctions);
 app.use(`${BASE}/attendance`, attendanceFunctions);
 app.use(`${BASE}/employees`, employeeFunctions);
