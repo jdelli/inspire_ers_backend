@@ -1,15 +1,18 @@
 const functions = require('firebase-functions');
 const express = require('express');
 const cors = require('cors');
+const { randomUUID } = require('crypto');
 
 const payrollFunctions = require('./src/api/payrollFunctions');
 const commissionFunctions = require('./src/api/commissionFunctions');
 const reportFunctions = require('./src/api/reportFunctions');
 const reportFunctionsPhase4 = require('./src/api/reportFunctionsPhase4');
+const activityFunctions = require('./src/api/activityFunctions');
 const employeeFunctions = require('./src/api/employeeFunctions');
 const employeeManagementFunctions = require('./src/api/employeeManagementFunctions');
 const attendanceFunctions = require('./src/api/attendanceFunctions');
 const fileFunctions = require('./src/api/fileFunctions');
+const firestoreFunctions = require('./src/api/firestoreFunctions');
 const auditFunctions = require('./src/api/auditFunctions');
 const payslipFunctions = require('./src/api/payslipFunctions');
 const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
@@ -20,12 +23,52 @@ const commissionService = require('./src/services/commissionService');
 const thirteenthMonthService = require('./src/services/thirteenthMonthService');
 const { requirePayrollAccess } = require('./src/middleware/payrollAuth');
 const { requireAuditAccess } = require('./src/middleware/auditAuth');
+const { attachRequestContext, requireAuthenticatedUser } = require('./src/middleware/requestContext');
+const { recordActivity } = require('./src/services/activityLogService');
+
+const buildCallableActivityContext = (context = {}) => {
+  const rawRequest = context.rawRequest || {};
+  const headers = rawRequest.headers || {};
+  const forwardedRaw = headers['x-forwarded-for'] || headers['X-Forwarded-For'];
+  const forwardedFor = typeof forwardedRaw === 'string'
+    ? forwardedRaw.split(',').map((value) => value.trim()).filter(Boolean)
+    : [];
+
+  const userContext = context.auth
+    ? {
+        uid: context.auth.uid || null,
+        email: (context.auth.token && context.auth.token.email) || null,
+        specialrole:
+          (context.auth.token && (context.auth.token.specialrole || context.auth.token.role)) || null,
+        token: context.auth.token || null,
+      }
+    : null;
+
+  return {
+    user: userContext,
+    request: {
+      requestId: headers['x-request-id'] || headers['X-Request-Id'] || context.eventId || randomUUID(),
+      ip: rawRequest.ip || headers['x-real-ip'] || null,
+      forwardedFor,
+      userAgent: headers['user-agent'] || null,
+    },
+  };
+};
+
+const logActivitySafe = async (payload = {}) => {
+  try {
+    await recordActivity(payload);
+  } catch (error) {
+    console.error('Failed to record activity log:', error);
+  }
+};
 
 const app = express();
 
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+app.use(attachRequestContext);
 
 // Apply payroll authorization middleware to payroll routes
 app.use('/payroll', requirePayrollAccess, payrollFunctions);
@@ -33,12 +76,14 @@ app.use('/trainee-payroll', requirePayrollAccess, traineePayrollFunctions);
 
 // Other routes remain unprotected
 app.use('/commissions', commissionFunctions);
-app.use('/reports', reportFunctions);
-app.use('/reports/v4', reportFunctionsPhase4);
-app.use('/employee-mgmt', employeeManagementFunctions);
-app.use('/attendance', attendanceFunctions);
+app.use('/reports', requireAuthenticatedUser, reportFunctions);
+app.use('/reports/v4', requireAuthenticatedUser, reportFunctionsPhase4);
+app.use('/activity', requireAuthenticatedUser, activityFunctions);
+app.use('/employee-mgmt', requireAuthenticatedUser, employeeManagementFunctions);
+app.use('/attendance', requireAuthenticatedUser, attendanceFunctions);
 app.use('/employees', employeeFunctions);
-app.use('/files', fileFunctions);
+app.use('/files', requireAuthenticatedUser, fileFunctions);
+app.use('/firestore', requireAuthenticatedUser, firestoreFunctions);
 app.use('/audit', requireAuditAccess, auditFunctions);
 app.use('/payslips', payslipFunctions);
 app.use('/admin', adminFunctions);
@@ -142,6 +187,28 @@ exports.calculatePayroll = functions.https.onCall(async (data, context) => {
       userId: context.auth.uid,
       token: context.auth.token,
     });
+    const activityContext = buildCallableActivityContext(context);
+    const payrollData = (result && result.payroll) || {};
+    const companyIdForLog =
+      payrollData.companyId || payload.companyId || (context.auth.token && context.auth.token.companyId) || null;
+
+    await logActivitySafe({
+      module: 'hr',
+      action: result && result.created ? 'PAYROLL_GENERATED' : 'PAYROLL_RECORD_UPDATED',
+      companyId: companyIdForLog,
+      entityType: 'employee',
+      entityId: payrollData.employeeId || payload.employeeId || null,
+      summary: `${result && result.created ? 'Generated' : 'Updated'} payroll via callable for employee ${
+        payrollData.employeeId || payload.employeeId || 'unknown'
+      }`,
+      metadata: {
+        payrollId: result && result.payrollId ? result.payrollId : null,
+        payrollKey: (result && (result.payrollKey || payrollData.payrollKey)) || null,
+        payDate: payrollData.payDate || payload.payDate || null,
+        created: Boolean(result && result.created),
+      },
+      context: activityContext,
+    });
     return result;
   } catch (error) {
     const code = mapServiceErrorCode(error.code);
@@ -177,6 +244,24 @@ exports.bulkCalculatePayroll = functions.https.onCall(async (data, context) => {
       userId: context.auth.uid,
       token: context.auth.token,
       companyId: payload.companyId,
+    });
+    const activityContext = buildCallableActivityContext(context);
+    const companyIdForLog = payload.companyId || (context.auth.token && context.auth.token.companyId) || null;
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'PAYROLL_BULK_GENERATED',
+      companyId: companyIdForLog,
+      entityType: 'batch',
+      entityId: null,
+      summary: `Bulk payroll callable processed ${result.created ?? 0} new and ${result.updated ?? 0} updated records`,
+      metadata: {
+        processed: result.processed ?? 0,
+        created: result.created ?? 0,
+        updated: result.updated ?? 0,
+        failed: result.failed ?? 0,
+      },
+      context: activityContext,
     });
     return result;
   } catch (error) {

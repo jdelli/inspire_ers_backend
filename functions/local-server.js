@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { attachRequestContext, requireAuthenticatedUser } = require('./src/middleware/requestContext');
 
 // Import all the route modules
 const authFunctions = require('./src/api/authFunctions');
@@ -19,6 +20,10 @@ const adminFunctions = require('./src/api/adminFunctions');
 console.log('Loading audit functions...');
 const auditFunctions = require('./src/api/auditFunctions');
 console.log('Audit functions loaded:', typeof auditFunctions, auditFunctions.stack ? 'Router object' : 'Unknown');
+
+console.log('Loading activity functions...');
+const activityFunctions = require('./src/api/activityFunctions');
+console.log('Activity functions loaded:', typeof activityFunctions, activityFunctions.stack ? 'Router object' : 'Unknown');
 
 const app = express();
 const PORT = 5001;
@@ -65,21 +70,22 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json());
+app.use(attachRequestContext);
 
 // Routes (mount under emulator-compatible base path)
 app.use(`${BASE}/auth`, authFunctions);
 app.use(`${BASE}/firestore`, firestoreFunctions);
-app.use(`${BASE}/payroll`, payrollFunctions);
-app.use(`${BASE}/commissions`, commissionFunctions);
-app.use(`${BASE}/reports`, reportFunctions);
-app.use(`${BASE}/reports/v4`, reportFunctionsPhase4);
-app.use(`${BASE}/employee-mgmt`, employeeManagementFunctions);
-app.use(`${BASE}/attendance`, attendanceFunctions);
+app.use(`${BASE}/payroll`, requireAuthenticatedUser, payrollFunctions);
+app.use(`${BASE}/commissions`, requireAuthenticatedUser, commissionFunctions);
+app.use(`${BASE}/reports`, requireAuthenticatedUser, reportFunctions);
+app.use(`${BASE}/reports/v4`, requireAuthenticatedUser, reportFunctionsPhase4);
+app.use(`${BASE}/employee-mgmt`, requireAuthenticatedUser, employeeManagementFunctions);
+app.use(`${BASE}/attendance`, requireAuthenticatedUser, attendanceFunctions);
 app.use(`${BASE}/employees`, employeeFunctions);
-app.use(`${BASE}/files`, fileFunctions);
-app.use(`${BASE}/trainee-payroll`, traineePayrollFunctions);
-app.use(`${BASE}/admin`, adminFunctions);
-app.use(`${BASE}/payslips`, payslipFunctions);
+app.use(`${BASE}/files`, requireAuthenticatedUser, fileFunctions);
+app.use(`${BASE}/trainee-payroll`, requireAuthenticatedUser, traineePayrollFunctions);
+app.use(`${BASE}/admin`, requireAuthenticatedUser, adminFunctions);
+app.use(`${BASE}/payslips`, requireAuthenticatedUser, payslipFunctions);
 
 console.log('Mounting audit routes at:', `${BASE}/audit`);
 app.use(`${BASE}/audit`, (req, res, next) => {
@@ -87,6 +93,13 @@ app.use(`${BASE}/audit`, (req, res, next) => {
   next();
 }, auditFunctions);
 console.log('Audit routes mounted successfully');
+
+console.log('Mounting activity routes at:', `${BASE}/activity`);
+app.use(`${BASE}/activity`, requireAuthenticatedUser, (req, res, next) => {
+  console.log('Activity route hit:', req.method, req.path, req.url);
+  next();
+}, activityFunctions);
+console.log('Activity routes mounted successfully');
 
 // Debug route to list all registered routes
 app.get('/debug/routes', (req, res) => {

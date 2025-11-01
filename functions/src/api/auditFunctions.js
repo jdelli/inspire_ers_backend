@@ -15,6 +15,7 @@ const {
   listTraineeIncidents,
   listIncidentReports,
 } = require('../services/auditService');
+const { recordActivity } = require('../services/activityLogService');
 
 const handleError = (res, error) => {
   const status =
@@ -32,6 +33,14 @@ const handleError = (res, error) => {
     message: error.message || 'An unexpected error occurred.',
     details: error.details,
   });
+};
+
+const logActivitySafe = async (payload = {}) => {
+  try {
+    await recordActivity(payload);
+  } catch (error) {
+    console.error('Failed to record audit activity log:', error);
+  }
 };
 
 router.get('/dashboard', async (req, res) => {
@@ -72,6 +81,28 @@ router.post('/employees/:employeeId/evaluations', async (req, res) => {
       email: req.user?.email || null,
     };
     const result = await addEmployeeEvaluation(employeeId, req.body || {}, context);
+
+     const evaluation = result?.evaluation || {};
+     await logActivitySafe({
+       module: 'audit',
+       action: 'AUDIT_EVALUATION_CREATED',
+       companyId: result.companyId,
+       entityType: result.entityType,
+       entityId: result.entityId,
+       summary: `Evaluation recorded for employee ${employeeId}`,
+       metadata: {
+         evaluationId: evaluation.id || null,
+         score: evaluation.score,
+         rating: evaluation.rating,
+         period: evaluation.period,
+         department: result.department || null,
+       },
+       context: {
+         user: req.user,
+         request: req.activityContext,
+       },
+     });
+
     return res.status(201).json(result);
   } catch (error) {
     return handleError(res, error);
@@ -96,6 +127,28 @@ router.post('/employees/:employeeId/incidents', async (req, res) => {
       email: req.user?.email || null,
     };
     const result = await addEmployeeIncident(employeeId, req.body || {}, context);
+
+    const incident = result?.incident || {};
+    await logActivitySafe({
+      module: 'audit',
+      action: 'AUDIT_INCIDENT_CREATED',
+      companyId: result.companyId,
+      entityType: result.entityType,
+      entityId: result.entityId,
+      summary: `Incident report created for employee ${employeeId}`,
+      metadata: {
+        incidentId: incident.id || null,
+        severity: incident.severity,
+        status: incident.status,
+        occurredAt: incident.occurredAt,
+        department: result.department || null,
+      },
+      context: {
+        user: req.user,
+        request: req.activityContext,
+      },
+    });
+
     return res.status(201).json(result);
   } catch (error) {
     return handleError(res, error);
@@ -130,6 +183,28 @@ router.post('/trainees/:traineeId/evaluations', async (req, res) => {
       email: req.user?.email || null,
     };
     const result = await addTraineeEvaluation(traineeId, req.body || {}, context);
+
+    const evaluation = result?.evaluation || {};
+    await logActivitySafe({
+      module: 'audit',
+      action: 'AUDIT_TRAINEE_EVALUATION_CREATED',
+      companyId: result.companyId,
+      entityType: result.entityType,
+      entityId: result.entityId,
+      summary: `Evaluation recorded for trainee ${traineeId}`,
+      metadata: {
+        evaluationId: evaluation.id || null,
+        score: evaluation.score,
+        rating: evaluation.rating,
+        period: evaluation.period,
+        department: result.department || null,
+      },
+      context: {
+        user: req.user,
+        request: req.activityContext,
+      },
+    });
+
     return res.status(201).json(result);
   } catch (error) {
     return handleError(res, error);
@@ -154,6 +229,28 @@ router.post('/trainees/:traineeId/incidents', async (req, res) => {
       email: req.user?.email || null,
     };
     const result = await addTraineeIncident(traineeId, req.body || {}, context);
+
+    const incident = result?.incident || {};
+    await logActivitySafe({
+      module: 'audit',
+      action: 'AUDIT_TRAINEE_INCIDENT_CREATED',
+      companyId: result.companyId,
+      entityType: result.entityType,
+      entityId: result.entityId,
+      summary: `Incident report created for trainee ${traineeId}`,
+      metadata: {
+        incidentId: incident.id || null,
+        severity: incident.severity,
+        status: incident.status,
+        occurredAt: incident.occurredAt,
+        department: result.department || null,
+      },
+      context: {
+        user: req.user,
+        request: req.activityContext,
+      },
+    });
+
     return res.status(201).json(result);
   } catch (error) {
     return handleError(res, error);

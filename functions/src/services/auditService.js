@@ -481,6 +481,10 @@ const addEmployeeEvaluation = async (employeeId, payload = {}, context = {}) => 
       id: snapshot.id,
       ...snapshot.data(),
     }),
+    companyId: data.companyId || null,
+    entityId: ref.id,
+    entityType: 'employee',
+    department: data.department || null,
   };
 };
 
@@ -512,6 +516,10 @@ const addEmployeeIncident = async (employeeId, payload = {}, context = {}) => {
       id: snapshot.id,
       ...snapshot.data(),
     }),
+    companyId: data.companyId || null,
+    entityId: ref.id,
+    entityType: 'employee',
+    department: data.department || null,
   };
 };
 
@@ -543,6 +551,10 @@ const addTraineeEvaluation = async (traineeId, payload = {}, context = {}) => {
       id: snapshot.id,
       ...snapshot.data(),
     }),
+    companyId: data.companyId || null,
+    entityId: ref.id,
+    entityType: 'trainee',
+    department: data.department || null,
   };
 };
 
@@ -574,6 +586,10 @@ const addTraineeIncident = async (traineeId, payload = {}, context = {}) => {
       id: snapshot.id,
       ...snapshot.data(),
     }),
+    companyId: data.companyId || null,
+    entityId: ref.id,
+    entityType: 'trainee',
+    department: data.department || null,
   };
 };
 

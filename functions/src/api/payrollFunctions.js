@@ -1,5 +1,6 @@
 const express = require('express');
 const initializeFirebaseAdmin = require('../config/firebase');
+const { recordActivity } = require('../services/activityLogService');
 
 // Initialize Firebase Admin
 const admin = initializeFirebaseAdmin();
@@ -88,6 +89,14 @@ const sanitizePayrollRecord = (payload = {}) => {
   }
 
   return sanitized;
+};
+
+const logActivitySafe = async (payload = {}) => {
+  try {
+    await recordActivity(payload);
+  } catch (error) {
+    console.error('Failed to record payroll activity log:', error);
+  }
 };
 
 // Calculate payroll for a single employee
@@ -220,7 +229,28 @@ router.post('/calculate', async (req, res) => {
     const payrollRef = db.collection('payrolls').doc(payrollData.payrollKey);
     await payrollRef.set(payrollData);
 
-    console.log('✅ Payroll calculated and saved for employee:', employeeId);
+    console.log('? Payroll calculated and saved for employee:', employeeId);
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'PAYROLL_GENERATED',
+      companyId,
+      entityType: 'employee',
+      entityId: employeeId,
+      summary: 'Payroll generated for employee ' + employeeId,
+      metadata: {
+        payrollKey: payrollData.payrollKey,
+        payDate,
+        cutoffStartDate,
+        cutoffEndDate,
+        netPay: Number(payrollData.netPay) || 0,
+        includeTaxes: Boolean(includeTaxes),
+      },
+      context: {
+        user: req.user,
+        request: req.activityContext,
+      },
+    });
 
     res.json({
       success: true,
@@ -240,7 +270,7 @@ router.post('/calculate', async (req, res) => {
 // Bulk calculate payroll for multiple employees
 router.post('/bulk', async (req, res) => {
   try {
-    const { employees } = req.body;
+    const { employees, companyId: bodyCompanyId } = req.body;
 
     console.log(`🔍 Bulk calculating payroll for ${employees.length} employees`);
 
@@ -284,6 +314,24 @@ router.post('/bulk', async (req, res) => {
     const failureCount = results.filter(r => !r.success).length;
 
     console.log(`✅ Bulk payroll completed: ${successCount} success, ${failureCount} failures`);
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'PAYROLL_BULK_GENERATED',
+      companyId: bodyCompanyId || req.user?.token?.companyId || null,
+      entityType: 'batch',
+      entityId: null,
+      summary: 'Bulk payroll processed for ' + employees.length + ' employees',
+      metadata: {
+        total: employees.length,
+        success: successCount,
+        failures: failureCount,
+      },
+      context: {
+        user: req.user,
+        request: req.activityContext,
+      },
+    });
 
     res.json({
       success: true,
@@ -332,9 +380,11 @@ router.post('/save-record', async (req, res) => {
     const docRef = db.collection('payrolls').doc(String(sanitized.payrollKey));
 
     let existingCreatedAt = null;
+    let existedBefore = false;
     try {
       const existingSnapshot = await docRef.get();
       if (existingSnapshot.exists) {
+        existedBefore = true;
         const data = existingSnapshot.data();
         existingCreatedAt =
           data?.createdAt ||
@@ -357,6 +407,26 @@ router.post('/save-record', async (req, res) => {
 
     const savedSnapshot = await docRef.get();
     const savedData = savedSnapshot.exists ? savedSnapshot.data() : sanitized;
+
+    await logActivitySafe({
+      module: 'hr',
+      action: existedBefore ? 'PAYROLL_RECORD_UPDATED' : 'PAYROLL_RECORD_CREATED',
+      companyId: sanitized.companyId || req.user?.token?.companyId || null,
+      entityType: 'employee',
+      entityId: sanitized.employeeId || null,
+      summary: `${existedBefore ? 'Updated' : 'Saved'} payroll record for employee ${sanitized.employeeId || 'unknown'}`,
+      metadata: {
+        payrollKey: sanitized.payrollKey,
+        payDate: sanitized.payDate || null,
+        cutoffStartDate: sanitized.cutoffStartDate || null,
+        cutoffEndDate: sanitized.cutoffEndDate || null,
+        wasUpdate: existedBefore,
+      },
+      context: {
+        user: req.user,
+        request: req.activityContext,
+      },
+    });
 
     res.json({
       success: true,
@@ -419,6 +489,25 @@ router.post('/delete-period', async (req, res) => {
 
     console.log(`✅ Deleted ${snapshot.docs.length} payroll records`);
 
+    await logActivitySafe({
+      module: 'hr',
+      action: 'PAYROLL_PERIOD_DELETED',
+      companyId,
+      entityType: 'company',
+      entityId: companyId,
+      summary: 'Deleted ' + snapshot.docs.length + ' payroll records for ' + payDate,
+      metadata: {
+        payDate,
+        cutoffStartDate: cutoffStartDate || null,
+        cutoffEndDate: cutoffEndDate || null,
+        deletedCount: snapshot.docs.length,
+      },
+      context: {
+        user: req.user,
+        request: req.activityContext,
+      },
+    });
+
     res.json({
       success: true,
       deleted: snapshot.docs.length,
@@ -478,6 +567,26 @@ router.post('/delete-employee', async (req, res) => {
 
     console.log(`✅ Deleted ${snapshot.docs.length} payroll record(s) for employee ${employeeId}`);
 
+    await logActivitySafe({
+      module: 'hr',
+      action: 'PAYROLL_EMPLOYEE_DELETED',
+      companyId,
+      entityType: 'employee',
+      entityId: employeeId,
+      summary: 'Deleted ' + snapshot.docs.length + ' payroll record(s) for employee ' + employeeId,
+      metadata: {
+        payDate,
+        employeeId,
+        cutoffStartDate: cutoffStartDate || null,
+        cutoffEndDate: cutoffEndDate || null,
+        deletedCount: snapshot.docs.length,
+      },
+      context: {
+        user: req.user,
+        request: req.activityContext,
+      },
+    });
+
     res.json({
       success: true,
       message: `Deleted ${snapshot.docs.length} payroll record(s) for employee`
@@ -493,3 +602,11 @@ router.post('/delete-employee', async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+
+
+
+
+

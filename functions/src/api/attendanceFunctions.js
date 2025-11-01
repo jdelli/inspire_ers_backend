@@ -2,6 +2,7 @@ const express = require('express');
 const initializeFirebaseAdmin = require('../config/firebase');
 const multer = require('multer');
 const XLSX = require('xlsx');
+const { recordActivity } = require('../services/activityLogService');
 
 // Configure multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
@@ -11,6 +12,19 @@ const admin = initializeFirebaseAdmin();
 
 const db = admin.firestore();
 const router = express.Router();
+
+const logActivitySafe = async (payload = {}) => {
+  try {
+    await recordActivity(payload);
+  } catch (error) {
+    console.error('Failed to record attendance activity log:', error);
+  }
+};
+
+const buildActivityContext = (req) => ({
+  user: req.user || null,
+  request: req.activityContext || {},
+});
 
 // ============================================================================
 // ATTENDANCE RECORDS CRUD ENDPOINTS
@@ -72,9 +86,10 @@ router.post('/process', async (req, res) => {
       .where('companyId', '==', companyId);
 
     const existingRecords = await existingQuery.get();
+    const existedBefore = existingRecords.docs.length > 0;
 
     let recordId;
-    if (existingRecords.docs.length > 0) {
+    if (existedBefore) {
       // Update existing record
       recordId = existingRecords.docs[0].id;
       await db.collection('timeRecords').doc(recordId).update(attendanceRecord);
@@ -85,6 +100,59 @@ router.post('/process', async (req, res) => {
       recordId = docRef.id;
       console.log(`✅ Created new attendance record: ${recordId}`);
     }
+
+    await logActivitySafe({
+      module: 'hr',
+      action: existedBefore ? 'ATTENDANCE_RECORD_UPDATED' : 'ATTENDANCE_RECORD_CREATED',
+      companyId,
+      entityType: 'employee',
+      entityId: employeeId,
+      summary: `${existedBefore ? 'Updated' : 'Created'} attendance record for employee ${employeeId} on ${date}`,
+      metadata: {
+        recordId,
+        status,
+        date,
+        timeIn: timeIn || null,
+        timeOut: timeOut || null,
+        totalMinutesLate: attendanceRecord.totalMinutesLate,
+        totalUndertimeMinutes: attendanceRecord.totalUndertimeMinutes,
+      },
+      context: buildActivityContext(req),
+    });
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'ATTENDANCE_SUMMARY_GENERATED',
+      companyId,
+      entityType: 'company',
+      entityId: companyId,
+      summary: `Generated attendance summary for ${dateRange}`,
+      metadata: {
+        employeeId: employeeId || 'ALL',
+        department: department || null,
+        summaries: summaries.length,
+        records: records.length,
+        source: 'calculated',
+      },
+      context: buildActivityContext(req),
+    });
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'ATTENDANCE_SUMMARY_GENERATED',
+      companyId,
+      entityType: 'company',
+      entityId: companyId,
+      summary: `Generated attendance summary for ${dateRange}`,
+      metadata: {
+        employeeId: employeeId || 'ALL',
+        department: department || null,
+        summaries: summaries.length,
+        records: records.length,
+        source: 'calculated',
+      },
+      context: buildActivityContext(req),
+    });
 
     res.json({
       success: true,
@@ -198,7 +266,24 @@ router.post('/bulk-process', async (req, res) => {
       });
     }
 
+    const bulkCompanyId = attendanceRecords.length > 0 ? (attendanceRecords[0].companyId || null) : null;
+
     const { successCount, errors } = await processBulkAttendance(attendanceRecords);
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'ATTENDANCE_BULK_PROCESSED',
+      companyId: bulkCompanyId,
+      entityType: 'bulk',
+      entityId: null,
+      summary: `Processed ${successCount}/${attendanceRecords.length} attendance records`,
+      metadata: {
+        total: attendanceRecords.length,
+        success: successCount,
+        failures: errors.length,
+      },
+      context: buildActivityContext(req),
+    });
 
     res.json({
       success: true,
@@ -304,53 +389,79 @@ router.get('/records', async (req, res) => {
 router.post('/delete', async (req, res) => {
   try {
     const { recordId, employeeId, date, companyId } = req.body;
-    
-    console.log('🔍 Deleting attendance record:', { recordId, employeeId, date, companyId });
+
+    console.log('?? Deleting attendance record:', { recordId, employeeId, date, companyId });
+
+    let deletedCount = 0;
+    let deletionSummary = '';
+    const deletionMetadata = {
+      mode: recordId ? 'byId' : 'byCriteria',
+      recordId: recordId || null,
+      employeeId: employeeId || null,
+      date: date || null,
+      companyId: companyId || null,
+    };
 
     if (recordId) {
-      // Delete by record ID
       await db.collection('timeRecords').doc(recordId).delete();
-      console.log(`✅ Deleted record: ${recordId}`);
+      console.log('? Deleted record: ' + recordId);
+      deletedCount = 1;
+      deletionSummary = 'Deleted attendance record ' + recordId;
     } else if (employeeId && date && companyId) {
-      // Delete by employee, date, and company
       const query = db.collection('timeRecords')
         .where('employeeId', '==', employeeId)
         .where('date', '==', date)
         .where('companyId', '==', companyId);
 
       const snapshot = await query.get();
-      
-      if (snapshot.docs.length === 0) {
+
+      if (snapshot.empty) {
         return res.status(404).json({
           success: false,
-          error: 'Record not found'
+          error: 'Record not found',
         });
       }
 
       const batch = db.batch();
-      snapshot.docs.forEach(doc => {
+      snapshot.docs.forEach((doc) => {
         batch.delete(doc.ref);
       });
       await batch.commit();
 
-      console.log(`✅ Deleted ${snapshot.docs.length} record(s) for employee ${employeeId} on ${date}`);
+      deletedCount = snapshot.docs.length;
+      deletionSummary =
+        'Deleted ' + snapshot.docs.length + ' attendance record(s) for employee ' + employeeId + ' on ' + date;
+      deletionMetadata.deletedRecords = snapshot.docs.map((doc) => doc.id);
+      console.log('? Deleted ' + snapshot.docs.length + ' record(s) for employee ' + employeeId + ' on ' + date);
     } else {
       return res.status(400).json({
         success: false,
-        error: 'Missing required parameters: either recordId or (employeeId, date, companyId)'
+        error: 'Missing required parameters: either recordId or (employeeId, date, companyId)',
       });
     }
 
-    res.json({
-      success: true,
-      message: 'Attendance record deleted successfully'
+    deletionMetadata.deletedCount = deletedCount;
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'ATTENDANCE_RECORD_DELETED',
+      companyId: companyId || null,
+      entityType: recordId ? 'attendanceRecord' : 'employee',
+      entityId: recordId || employeeId || null,
+      summary: deletionSummary || 'Deleted attendance record',
+      metadata: deletionMetadata,
+      context: buildActivityContext(req),
     });
 
+    res.json({
+      success: true,
+      message: 'Attendance record deleted successfully',
+    });
   } catch (error) {
-    console.error('❌ Error deleting attendance record:', error);
+    console.error('? Error deleting attendance record:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -676,6 +787,22 @@ router.post('/report', async (req, res) => {
         ...doc.data()
       }));
       
+      await logActivitySafe({
+        module: 'hr',
+        action: 'ATTENDANCE_SUMMARY_ACCESSED',
+        companyId,
+        entityType: 'company',
+        entityId: companyId,
+        summary: `Downloaded existing attendance summary for ${dateRange}`,
+        metadata: {
+          records: summaries.length,
+          employeeId: employeeId || 'ALL',
+          department: department || null,
+          source: 'existing',
+        },
+        context: buildActivityContext(req),
+      });
+
       return res.json({
         success: true,
         summaries,
@@ -735,6 +862,23 @@ router.post('/report', async (req, res) => {
     console.log(`📊 Filtered to ${filteredRecords.length} records matching criteria`);
 
     if (filteredRecords.length === 0) {
+      await logActivitySafe({
+        module: 'hr',
+        action: 'ATTENDANCE_SUMMARY_GENERATED',
+        companyId,
+        entityType: 'company',
+        entityId: companyId,
+        summary: `No attendance records found for ${dateRange}`,
+        metadata: {
+          employeeId: employeeId || 'ALL',
+          department: department || null,
+          summaries: 0,
+          records: 0,
+          source: 'calculated',
+        },
+        context: buildActivityContext(req),
+      });
+
       return res.json({
         success: true,
         summaries: [],
@@ -848,6 +992,22 @@ router.post('/generateAttendanceReport', async (req, res) => {
         ...doc.data()
       }));
       
+      await logActivitySafe({
+        module: 'hr',
+        action: 'ATTENDANCE_SUMMARY_ACCESSED',
+        companyId,
+        entityType: 'company',
+        entityId: companyId,
+        summary: `Downloaded existing attendance summary for ${dateRange}`,
+        metadata: {
+          records: summaries.length,
+          employeeId: employeeId || 'ALL',
+          department: department || null,
+          source: 'existing',
+        },
+        context: buildActivityContext(req),
+      });
+
       return res.json({
         success: true,
         summaries,
@@ -907,6 +1067,23 @@ router.post('/generateAttendanceReport', async (req, res) => {
     console.log(`📊 Filtered to ${filteredRecords.length} records matching criteria`);
 
     if (filteredRecords.length === 0) {
+      await logActivitySafe({
+        module: 'hr',
+        action: 'ATTENDANCE_SUMMARY_GENERATED',
+        companyId,
+        entityType: 'company',
+        entityId: companyId,
+        summary: `No attendance records found for ${dateRange}`,
+        metadata: {
+          employeeId: employeeId || 'ALL',
+          department: department || null,
+          summaries: 0,
+          records: 0,
+          source: 'calculated',
+        },
+        context: buildActivityContext(req),
+      });
+
       return res.json({
         success: true,
         summaries: [],
@@ -1293,3 +1470,8 @@ router.post('/biometric-upload', upload.single('file'), async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+
+
+
+

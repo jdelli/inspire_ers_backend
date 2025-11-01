@@ -1,10 +1,24 @@
 const express = require('express');
 const initializeFirebaseAdmin = require('../config/firebase');
+const { recordActivity } = require('../services/activityLogService');
 
 const router = express.Router();
 
 // Initialize Firebase Admin
 const admin = initializeFirebaseAdmin();
+
+const logActivitySafe = async (payload = {}) => {
+  try {
+    await recordActivity(payload);
+  } catch (error) {
+    console.error('Failed to record file activity log:', error);
+  }
+};
+
+const buildActivityContext = (req) => ({
+  user: req.user || null,
+  request: req.activityContext || {},
+});
 
 function createServiceError(code, message, status = 500, details) {
   const err = new Error(message);
@@ -75,6 +89,22 @@ router.post('/upload', async (req, res, next) => {
 
     const downloadURL = buildDownloadURL(bucketName, path, token);
 
+    await logActivitySafe({
+      module: 'hr',
+      action: 'FILE_UPLOADED',
+      companyId: cid || req.user?.token?.companyId || null,
+      entityType: 'file',
+      entityId: path,
+      summary: 'Uploaded file ' + path,
+      metadata: {
+        path,
+        bucket: bucketName,
+        size: buffer.length,
+        contentType,
+      },
+      context: buildActivityContext(req),
+    });
+
     res.status(201).json({
       success: true,
       path,
@@ -112,6 +142,21 @@ router.get('/signed-url', async (req, res, next) => {
       expires,
     });
 
+    await logActivitySafe({
+      module: 'hr',
+      action: 'FILE_SIGNED_URL_GENERATED',
+      companyId: req.query?.companyId || req.user?.token?.companyId || null,
+      entityType: 'file',
+      entityId: String(path),
+      summary: 'Generated signed download URL for ' + path,
+      metadata: {
+        path: String(path),
+        expiresAt: new Date(expires).toISOString(),
+        expiresInSeconds: Number(expiresIn) > 0 ? Number(expiresIn) : 900,
+      },
+      context: buildActivityContext(req),
+    });
+
     res.json({ success: true, url, path });
   } catch (err) {
     next(err);
@@ -137,4 +182,3 @@ router.post('/delete', async (req, res, next) => {
 });
 
 module.exports = router;
-

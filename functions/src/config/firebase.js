@@ -12,6 +12,13 @@ function initializeFirebaseAdmin() {
     return admin;
   }
 
+  // Check if Firebase Admin is already initialized
+  if (admin.apps && admin.apps.length > 0) {
+    firebaseInitialized = true;
+    console.log('ℹ️ Firebase Admin already initialized, reusing existing app');
+    return admin;
+  }
+
   try {
     // Production: Use environment variables
     if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {

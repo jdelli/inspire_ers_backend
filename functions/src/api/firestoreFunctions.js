@@ -1,5 +1,6 @@
 const express = require('express');
 const initializeFirebaseAdmin = require('../config/firebase');
+const { recordActivity } = require('../services/activityLogService');
 
 // Initialize Firebase Admin
 const admin = initializeFirebaseAdmin();
@@ -12,12 +13,15 @@ const router = express.Router();
 
 // Query collection with filters and ordering
 router.post('/query', async (req, res) => {
+  console.log('🔥 [FIRESTORE] /query endpoint hit!');
+  console.log('🔥 [FIRESTORE] Request body:', JSON.stringify(req.body, null, 2));
   try {
     const { collection, filters = [], orderBy = [], limit, limitToLast, startAt, startAfter, endAt, endBefore } = req.body;
     
     console.log('🔍 Firestore query:', { collection, filters, orderBy });
 
     if (!collection) {
+      console.log('❌ [FIRESTORE] No collection provided');
       return res.status(400).json({
         success: false,
         error: 'Collection path is required'
@@ -59,13 +63,17 @@ router.post('/query', async (req, res) => {
       query = query.endBefore(endBefore);
     }
 
+    console.log('🔍 [FIRESTORE] Executing query...');
     const snapshot = await query.get();
+    console.log('🔍 [FIRESTORE] Query executed, snapshot size:', snapshot.size);
+    
     const docs = snapshot.docs.map(doc => ({
       id: doc.id,
       data: doc.data()
     }));
 
     console.log(`📊 Query returned ${docs.length} documents`);
+    console.log(`📊 First doc sample:`, docs[0] ? JSON.stringify(docs[0], null, 2) : 'No docs');
 
     res.json({
       success: true,
@@ -75,6 +83,7 @@ router.post('/query', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Firestore query error:', error);
+    console.error('❌ Error stack:', error.stack);
     res.status(500).json({
       success: false,
       error: error.message
@@ -84,12 +93,15 @@ router.post('/query', async (req, res) => {
 
 // Get single document
 router.post('/get', async (req, res) => {
+  console.log('🔥 [FIRESTORE] /get endpoint hit!');
+  console.log('🔥 [FIRESTORE] Request body:', JSON.stringify(req.body, null, 2));
   try {
     const { collection, id } = req.body;
     
     console.log('🔍 Firestore getDoc:', { collection, id });
 
     if (!collection || !id) {
+      console.log('❌ [FIRESTORE] Missing collection or id');
       return res.status(400).json({
         success: false,
         error: 'Collection and id are required'
@@ -194,10 +206,14 @@ router.post('/set', async (req, res) => {
 
 // Update document
 router.post('/update', async (req, res) => {
+  console.log('🔥🔥🔥 [FIRESTORE] /update endpoint HIT!');
+  console.log('🔥🔥🔥 [FIRESTORE] Request body:', JSON.stringify(req.body, null, 2));
+  console.log('🔥🔥🔥 [FIRESTORE] User:', req.user);
   try {
     const { collection, id, data } = req.body;
 
     console.log('🔍 Firestore updateDoc:', { collection, id, data });
+    console.log('🔍 Request user:', req.user);
 
     if (!collection || !id || !data) {
       return res.status(400).json({
@@ -221,9 +237,49 @@ router.post('/update', async (req, res) => {
     }
 
     const docRef = db.collection(collection).doc(id);
+
+    const existingSnapshot = await docRef.get();
+    const existingData = existingSnapshot.exists ? existingSnapshot.data() : {};
+
     await docRef.update(processedData);
 
     console.log(`✅ Document updated with ID: ${id}`, processedData);
+
+    // Record activity for employee updates
+    if (collection.includes('employees') && req.user) {
+      try {
+        const updatedFields = Object.keys(data).filter(key => key !== 'updatedAt');
+        const companyIdForActivity = data.companyId ?? existingData?.companyId ?? null;
+
+        await recordActivity({
+          module: 'hr',
+          action: 'EMPLOYEE_RECORD_UPDATED',
+          companyId: companyIdForActivity,
+          entityType: 'employee',
+          entityId: id,
+          summary: `Updated employee record (${updatedFields.join(', ')})`,
+          metadata: {
+            collection,
+            updatedFields,
+            documentId: id,
+            companyId: companyIdForActivity,
+          },
+          context: {
+            user: req.user,
+            request: {
+              requestId: req.requestId,
+              ipAddress: req.ipAddress,
+              forwardedFor: req.forwardedFor || [],
+              userAgent: req.headers['user-agent'] || null
+            }
+          },
+        });
+        console.log('✅ Activity logged for employee update');
+      } catch (activityError) {
+        console.error('⚠️ Failed to log activity:', activityError);
+        // Don't fail the request if activity logging fails
+      }
+    }
 
     res.json({
       success: true,

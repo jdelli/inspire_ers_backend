@@ -1,11 +1,25 @@
 const express = require('express');
 const initializeFirebaseAdmin = require('../config/firebase');
+const { recordActivity } = require('../services/activityLogService');
 const router = express.Router();
 
 // Initialize Firebase Admin
 const admin = initializeFirebaseAdmin();
 // Initialize Firestore
 const db = admin.firestore();
+
+const logActivitySafe = async (payload = {}) => {
+  try {
+    await recordActivity(payload);
+  } catch (error) {
+    console.error('Failed to record report activity log:', error);
+  }
+};
+
+const buildActivityContext = (req) => ({
+  user: req.user || null,
+  request: req.activityContext || {},
+});
 
 // Basic report functions phase 4 - placeholder implementation
 router.get('/health', (req, res) => {
@@ -142,7 +156,7 @@ router.post('/payroll', async (req, res) => {
 
     console.log(`✅ Found ${allRecords.length} payroll records for company: ${companyId}`);
 
-    res.json({
+    const responsePayload = {
       success: true,
       reportData: {
         records: allRecords,
@@ -155,7 +169,25 @@ router.post('/payroll', async (req, res) => {
         endDate,
         generatedAt: new Date().toISOString(),
       },
+    };
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'PAYROLL_REPORT_GENERATED',
+      companyId,
+      entityType: 'company',
+      entityId: companyId,
+      summary: 'Generated payroll report for ' + companyId,
+      metadata: {
+        startDate: startDate || null,
+        endDate: endDate || null,
+        recordCount: allRecords.length,
+        route: '/reports/v4/payroll',
+      },
+      context: buildActivityContext(req),
     });
+
+    res.json(responsePayload);
   } catch (error) {
     console.error('❌ Error generating payroll report:', error);
     res.status(500).json({
@@ -221,7 +253,7 @@ router.get('/trainee-payroll', async (req, res) => {
 
     console.log(`✅ Found ${allRecords.length} trainee payroll records for company: ${companyId}`);
 
-    res.json({
+    const traineeResponse = {
       success: true,
       reportData: {
         records: allRecords,
@@ -231,7 +263,25 @@ router.get('/trainee-payroll', async (req, res) => {
         endDate,
         generatedAt: new Date().toISOString(),
       },
+    };
+
+    await logActivitySafe({
+      module: 'hr',
+      action: 'TRAINEE_PAYROLL_REPORT_GENERATED',
+      companyId,
+      entityType: 'company',
+      entityId: companyId,
+      summary: 'Generated trainee payroll report for ' + companyId,
+      metadata: {
+        startDate: startDate || null,
+        endDate: endDate || null,
+        recordCount: allRecords.length,
+        route: '/reports/v4/trainee-payroll',
+      },
+      context: buildActivityContext(req),
     });
+
+    res.json(traineeResponse);
   } catch (error) {
     console.error('❌ Error generating trainee payroll report:', error);
     res.status(500).json({
@@ -243,3 +293,4 @@ router.get('/trainee-payroll', async (req, res) => {
 });
 
 module.exports = router;
+
