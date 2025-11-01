@@ -12,7 +12,7 @@ const firestore = () => {
   return admin.firestore();
 };
 
-const ALLOWED_ROLES = new Set(['superadmin', 'audit', 'payroll', 'hr']);
+const ALLOWED_ROLES = new Set(['superadmin', 'admin', 'audit', 'payroll', 'hr']);
 
 const toIsoString = (value) => {
   if (!value) {
@@ -145,23 +145,23 @@ router.get('/', async (req, res) => {
     }
     console.log('✅ [ACTIVITY] Access granted');
 
-    const companyId = String(req.query.companyId || '').trim();
-    console.log('🔍 [ACTIVITY] CompanyId:', companyId);
-    if (!companyId) {
-      console.log('❌ [ACTIVITY] No companyId provided');
-      return res.status(400).json({
-        success: false,
-        error: 'invalid-argument',
-        message: 'companyId is required.',
-      });
-    }
+    const userRole = (req.user?.specialrole || '').toLowerCase();
+    const companyId = req.query.companyId ? String(req.query.companyId).trim() : null;
+    console.log('🔍 [ACTIVITY] User role:', userRole);
+    console.log('🔍 [ACTIVITY] CompanyId:', companyId || 'ALL COMPANIES');
 
     const limitParam = Number(req.query.limit);
     const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 200) : 50;
-    const moduleFilter = req.query.module ? String(req.query.module).trim() : null;
+    let moduleFilter = req.query.module ? String(req.query.module).trim() : null;
     const actionFilter = req.query.action ? String(req.query.action).trim() : null;
     const actorFilter = req.query.actor ? String(req.query.actor).trim() : null;
     const cursorId = req.query.cursor ? String(req.query.cursor).trim() : null;
+
+    // Force audit users to only see audit module logs
+    if (userRole === 'audit' && !moduleFilter) {
+      moduleFilter = 'audit';
+      console.log('🔒 [ACTIVITY] Audit role detected - forcing module filter to "audit"');
+    }
 
     console.log('🔍 [ACTIVITY] Query filters:', { limit, moduleFilter, actionFilter, actorFilter, cursorId });
 
@@ -170,10 +170,14 @@ router.get('/', async (req, res) => {
 
     console.log('🔍 [ACTIVITY] Querying global activityLogs collection');
 
-    let query = activityCollection
-      .where('companyId', '==', companyId)
-      .orderBy('performedAt', 'desc');
+    let query = activityCollection.orderBy('performedAt', 'desc');
 
+    // Only filter by company if provided (don't require it)
+    if (companyId) {
+      query = query.where('companyId', '==', companyId);
+    }
+
+    // Apply module filter (including forced audit filter)
     if (moduleFilter) {
       query = query.where('module', '==', moduleFilter);
     }
