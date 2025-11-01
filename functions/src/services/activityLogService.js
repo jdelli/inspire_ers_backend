@@ -8,6 +8,20 @@ const firestore = () => {
   return admin.firestore();
 };
 
+// Deduplication cache to prevent duplicate logs within 5 seconds
+const recentActivityCache = new Map();
+const DEDUP_WINDOW_MS = 5000; // 5 seconds
+
+// Clean up old cache entries every minute
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of recentActivityCache.entries()) {
+    if (now - timestamp > DEDUP_WINDOW_MS) {
+      recentActivityCache.delete(key);
+    }
+  }
+}, 60000);
+
 const ActivityCollections = {
   GLOBAL: 'activityLogs',
   COMPANY: 'activityLogs',
@@ -49,7 +63,7 @@ const sanitizeMetadata = (metadata) => {
 const recordActivity = async (payload = {}) => {
   console.log('🎯 [ACTIVITY SERVICE] recordActivity called!');
   console.log('🎯 [ACTIVITY SERVICE] Payload:', JSON.stringify(payload, null, 2));
-  
+
   const {
     module = 'general',
     action,
@@ -71,6 +85,21 @@ const recordActivity = async (payload = {}) => {
   const db = firestore();
   const actor = buildActor(context);
   const sanitized = sanitizeMetadata(metadata);
+
+  // Create deduplication key based on critical fields (after building actor)
+  const dedupKey = `${action}:${companyId}:${entityType}:${entityId}:${actor.uid}:${JSON.stringify(sanitized)}`;
+  const now = Date.now();
+  const lastSeen = recentActivityCache.get(dedupKey);
+
+  // Check if this exact activity was logged recently (within 5 seconds)
+  if (lastSeen && (now - lastSeen) < DEDUP_WINDOW_MS) {
+    console.log('⚠️ [ACTIVITY SERVICE] Duplicate activity detected, skipping log');
+    console.log('⚠️ [ACTIVITY SERVICE] Last seen:', Math.round((now - lastSeen) / 1000), 'seconds ago');
+    return null; // Skip duplicate
+  }
+
+  // Update cache with current timestamp
+  recentActivityCache.set(dedupKey, now);
 
   const requestMeta = context.request?.requestContext || context.request || {};
   const ipAddress = requestMeta.ipAddress || requestMeta.ip || null;
