@@ -12,7 +12,8 @@ const firestore = () => {
   return admin.firestore();
 };
 
-const ALLOWED_ROLES = new Set(['superadmin', 'admin', 'audit', 'payroll', 'hr']);
+// Allow managers to view activity timeline as well
+const ALLOWED_ROLES = new Set(['superadmin', 'admin', 'audit', 'payroll', 'hr', 'manager']);
 
 const toIsoString = (value) => {
   if (!value) {
