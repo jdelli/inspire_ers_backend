@@ -251,30 +251,56 @@ router.post('/update', async (req, res) => {
         const updatedFields = Object.keys(data).filter(key => key !== 'updatedAt');
         const companyIdForActivity = data.companyId ?? existingData?.companyId ?? null;
 
-        await recordActivity({
-          module: 'hr',
-          action: 'EMPLOYEE_RECORD_UPDATED',
-          companyId: companyIdForActivity,
-          entityType: 'employee',
-          entityId: id,
-          summary: `Updated employee record (${updatedFields.join(', ')})`,
-          metadata: {
-            collection,
-            updatedFields,
-            documentId: id,
-            companyId: companyIdForActivity,
-          },
-          context: {
-            user: req.user,
-            request: {
-              requestId: req.requestId,
-              ipAddress: req.ipAddress,
-              forwardedFor: req.forwardedFor || [],
-              userAgent: req.headers['user-agent'] || null
-            }
-          },
+        // Track what actually changed (old value → new value)
+        const changes = {};
+        updatedFields.forEach(field => {
+          const oldValue = existingData[field];
+          const newValue = data[field];
+
+          // Only log if value actually changed
+          if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+            changes[field] = {
+              from: oldValue !== undefined ? oldValue : null,
+              to: newValue !== undefined ? newValue : null
+            };
+          }
         });
-        console.log('✅ Activity logged for employee update');
+
+        const changedFieldNames = Object.keys(changes);
+
+        // Only log if there are actual changes
+        if (changedFieldNames.length > 0) {
+          await recordActivity({
+            module: 'hr',
+            action: 'EMPLOYEE_RECORD_UPDATED',
+            companyId: companyIdForActivity,
+            entityType: 'employee',
+            entityId: id,
+            summary: `Updated employee record: ${changedFieldNames.join(', ')}`,
+            metadata: {
+              collection,
+              updatedFields: changedFieldNames,
+              changes: changes,
+              documentId: id,
+              companyId: companyIdForActivity,
+              employeeName: existingData?.firstName && existingData?.lastName
+                ? `${existingData.firstName} ${existingData.lastName}`
+                : 'Unknown Employee'
+            },
+            context: {
+              user: req.user,
+              request: {
+                requestId: req.requestId,
+                ipAddress: req.ipAddress,
+                forwardedFor: req.forwardedFor || [],
+                userAgent: req.headers['user-agent'] || null
+              }
+            },
+          });
+          console.log('✅ Activity logged for employee update with changes:', changedFieldNames);
+        } else {
+          console.log('ℹ️ No actual changes detected, skipping activity log');
+        }
       } catch (activityError) {
         console.error('⚠️ Failed to log activity:', activityError);
         // Don't fail the request if activity logging fails
