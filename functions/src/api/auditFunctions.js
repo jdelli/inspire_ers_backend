@@ -10,6 +10,7 @@ const {
   addEmployeeIncident,
   listEmployeeIncidents,
   listEmployeeDailyReports,
+  listEmployeeIRReports,
   addTraineeEvaluation,
   listTraineeEvaluations,
   addTraineeIncident,
@@ -128,6 +129,22 @@ router.get('/employees/:employeeId/daily-reports', async (req, res) => {
       date: date || null,
       startDate: startDate || null,
       endDate: endDate || null,
+      limit: Number.isFinite(Number(limit)) ? Number(limit) : undefined,
+    });
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.get('/employees/:employeeId/ir-reports', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { startDate, endDate, status, limit } = req.query;
+    const result = await listEmployeeIRReports(employeeId, {
+      startDate: startDate || null,
+      endDate: endDate || null,
+      status: status || null,
       limit: Number.isFinite(Number(limit)) ? Number(limit) : undefined,
     });
     return res.json(result);

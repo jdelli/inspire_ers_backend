@@ -226,6 +226,22 @@ const normalizeDailyReportDoc = (doc) => {
   };
 };
 
+const normalizeIRReportDoc = (doc) => {
+  return {
+    id: doc.id,
+    title: safeString(doc.title),
+    summary: safeString(doc.summary),
+    date: safeString(doc.date),
+    severity: safeString(doc.severity || 'medium'),
+    status: safeString(doc.status || 'Open'),
+    impact: safeString(doc.impact),
+    reportedBy: safeString(doc.reportedBy),
+    actions: Array.isArray(doc.actions) ? doc.actions.map(a => safeString(a)).filter(Boolean) : [],
+    createdAt: formatTimestamp(doc.createdAt),
+    updatedAt: formatTimestamp(doc.updatedAt),
+  };
+};
+
 const getCompanySummary = async ({ companyId }) => {
   try {
     const db = firestore();
@@ -771,6 +787,78 @@ const listTraineeIncidents = async (traineeId) => {
   };
 };
 
+const listEmployeeIRReports = async (employeeId, options = {}) => {
+  try {
+    const db = firestore();
+    const employeeRef = db.collection(EMPLOYEE_COLLECTION).doc(employeeId);
+    const employeeDoc = await employeeRef.get();
+
+    if (!employeeDoc.exists) {
+      return {
+        success: true,
+        irReports: [],
+        employee: null,
+        summary: {
+          total: 0,
+          open: 0,
+          closed: 0,
+        },
+      };
+    }
+
+    const employeeData = employeeDoc.data();
+
+    let query = employeeRef.collection('irReports');
+
+    // Order by date descending - do NOT add status filter to avoid composite index requirement
+    query = query.orderBy('date', 'desc');
+
+    // Apply limit
+    const limit = Math.min(options.limit || 100, 500);
+    query = query.limit(limit);
+
+    const snapshot = await query.get();
+    let irReports = readCollectionDocs(snapshot).map(normalizeIRReportDoc);
+
+    // Filter by date range in memory if needed
+    if (options.startDate) {
+      irReports = irReports.filter(r => r.date >= options.startDate);
+    }
+    if (options.endDate) {
+      irReports = irReports.filter(r => r.date <= options.endDate);
+    }
+
+    // Filter by status in memory to avoid composite index requirement
+    if (options.status && options.status !== 'all') {
+      irReports = irReports.filter(r => r.status?.toLowerCase() === options.status.toLowerCase());
+    }
+
+    // Calculate summary
+    const summary = {
+      total: irReports.length,
+      open: irReports.filter(r => r.status.toLowerCase() === 'open').length,
+      closed: irReports.filter(r => r.status.toLowerCase() === 'closed').length,
+    };
+
+    return {
+      success: true,
+      irReports,
+      employee: {
+        id: employeeRef.id,
+        name: employeeData.employeeName || `${employeeData.firstName || ''} ${employeeData.lastName || ''}`.trim(),
+        department: employeeData.department || null,
+        companyId: employeeData.companyId || null,
+      },
+      summary,
+    };
+  } catch (error) {
+    if (error.code) {
+      throw error;
+    }
+    throw createServiceError('internal', `Failed to list employee IR reports: ${error.message}`);
+  }
+};
+
 const listIncidentReports = async ({ companyId, status, limit = 200 }) => {
   try {
     const db = firestore();
@@ -824,6 +912,7 @@ module.exports = {
   addEmployeeIncident,
   listEmployeeIncidents,
   listEmployeeDailyReports,
+  listEmployeeIRReports,
   addTraineeEvaluation,
   listTraineeEvaluations,
   addTraineeIncident,
