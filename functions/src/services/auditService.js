@@ -31,6 +31,31 @@ const safeNumber = (value, fallback = null) => {
   return Number.isFinite(numeric) ? numeric : fallback;
 };
 
+const safeBoolean = (value, fallback = false) => {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const lower = value.toLowerCase().trim();
+    if (['true', '1', 'yes', 'y'].includes(lower)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'n'].includes(lower)) {
+      return false;
+    }
+  }
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) {
+      return fallback;
+    }
+    return value !== 0;
+  }
+  return fallback;
+};
+
 const formatTimestamp = (timestamp) => {
   if (!timestamp) {
     return null;
@@ -169,6 +194,37 @@ const normalizeIncidentDoc = (doc) => ({
   lastUpdatedAt: formatTimestamp(doc.lastUpdatedAt),
   lastUpdatedBy: doc.lastUpdatedBy || null,
 });
+
+const normalizeDailyReportDoc = (doc) => {
+  const entries = Array.isArray(doc.entries)
+    ? doc.entries
+        .map((entry = {}, index) => {
+          const hour = entry.hour != null ? String(entry.hour).trim() : '';
+          const activity = entry.activity != null ? String(entry.activity).trim() : '';
+          const notes = entry.notes == null || entry.notes === '' ? null : String(entry.notes).trim();
+          if (!hour && !activity && !notes) {
+            return null;
+          }
+          return {
+            id: entry.id || String(index),
+            hour,
+            activity,
+            notes,
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
+    id: doc.id,
+    date: safeString(doc.date) || doc.id || null,
+    complete: safeBoolean(doc.complete, false),
+    submittedBy: doc.submittedBy || null,
+    entries,
+    createdAt: formatTimestamp(doc.createdAt),
+    updatedAt: formatTimestamp(doc.updatedAt),
+  };
+};
 
 const getCompanySummary = async ({ companyId }) => {
   try {
@@ -532,6 +588,119 @@ const listEmployeeIncidents = async (employeeId) => {
   };
 };
 
+const listEmployeeDailyReports = async (employeeId, options = {}) => {
+  let employeeRecord;
+  try {
+    employeeRecord = await ensureEmployee(employeeId);
+  } catch (error) {
+    if (error.code === 'not-found') {
+      return {
+        success: true,
+        report: null,
+        reports: [],
+        employee: null,
+        summary: {
+          total: 0,
+          completed: 0,
+          pending: 0,
+        },
+      };
+    }
+    throw error;
+  }
+
+  const { ref, data } = employeeRecord;
+  const reportsCollection = ref.collection('dailyReports');
+
+  const limit = Math.min(Math.max(Number(options.limit) || 30, 1), 90);
+  const startDate = options.startDate ? safeString(options.startDate) : null;
+  const endDate = options.endDate ? safeString(options.endDate) : null;
+  const date = options.date ? safeString(options.date) : null;
+
+  if (date) {
+    const docSnapshot = await reportsCollection.doc(date).get();
+    if (!docSnapshot.exists) {
+      return {
+        success: true,
+        report: null,
+        reports: [],
+        employee: {
+          id: ref.id,
+          name:
+            data.employeeName ||
+            `${safeString(data.firstName)} ${safeString(data.lastName)}`.trim() ||
+            null,
+          department: data.department || null,
+          companyId: data.companyId || null,
+        },
+        summary: {
+          total: 0,
+          completed: 0,
+          pending: 0,
+        },
+      };
+    }
+
+    const normalized = normalizeDailyReportDoc({ id: docSnapshot.id, ...docSnapshot.data() });
+    const completedCount = normalized.complete ? 1 : 0;
+    return {
+      success: true,
+      report: normalized,
+      reports: [normalized],
+      employee: {
+        id: ref.id,
+        name:
+          data.employeeName ||
+          `${safeString(data.firstName)} ${safeString(data.lastName)}`.trim() ||
+          null,
+        department: data.department || null,
+        companyId: data.companyId || null,
+      },
+      summary: {
+        total: 1,
+        completed: completedCount,
+        pending: normalized.complete ? 0 : 1,
+      },
+    };
+  }
+
+  let query = reportsCollection;
+  if (startDate && endDate) {
+    query = query.where('date', '>=', startDate).where('date', '<=', endDate);
+  } else if (startDate) {
+    query = query.where('date', '>=', startDate);
+  } else if (endDate) {
+    query = query.where('date', '<=', endDate);
+  }
+
+  query = query.orderBy('date', 'desc').limit(limit);
+
+  const snapshot = await query.get();
+  const reports = snapshot.docs.map((doc) => normalizeDailyReportDoc({ id: doc.id, ...doc.data() }));
+
+  const completed = reports.filter((report) => report.complete).length;
+  const pending = reports.length - completed;
+
+  return {
+    success: true,
+    reports,
+    employee: {
+      id: ref.id,
+      name:
+        data.employeeName ||
+        `${safeString(data.firstName)} ${safeString(data.lastName)}`.trim() ||
+        null,
+      department: data.department || null,
+      companyId: data.companyId || null,
+    },
+    summary: {
+      total: reports.length,
+      completed,
+      pending,
+    },
+  };
+};
+
 const addTraineeEvaluation = async (traineeId, payload = {}, context = {}) => {
   const { ref, data } = await ensureTrainee(traineeId);
   const evaluationRecord = attachEntityMetadata(
@@ -654,6 +823,7 @@ module.exports = {
   listEmployeeEvaluations,
   addEmployeeIncident,
   listEmployeeIncidents,
+  listEmployeeDailyReports,
   addTraineeEvaluation,
   listTraineeEvaluations,
   addTraineeIncident,

@@ -9,6 +9,7 @@ const {
   listEmployeeEvaluations,
   addEmployeeIncident,
   listEmployeeIncidents,
+  listEmployeeDailyReports,
   addTraineeEvaluation,
   listTraineeEvaluations,
   addTraineeIncident,
@@ -113,6 +114,22 @@ router.get('/employees/:employeeId/incidents', async (req, res) => {
   try {
     const { employeeId } = req.params;
     const result = await listEmployeeIncidents(employeeId);
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+router.get('/employees/:employeeId/daily-reports', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { date, startDate, endDate, limit } = req.query;
+    const result = await listEmployeeDailyReports(employeeId, {
+      date: date || null,
+      startDate: startDate || null,
+      endDate: endDate || null,
+      limit: Number.isFinite(Number(limit)) ? Number(limit) : undefined,
+    });
     return res.json(result);
   } catch (error) {
     return handleError(res, error);
