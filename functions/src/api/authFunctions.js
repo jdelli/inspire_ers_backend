@@ -310,4 +310,116 @@ router.get('/user-companies/:userId', async (req, res) => {
   }
 });
 
+// Forgot password endpoint - Send password reset email
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    console.log('🔍 Password reset request:', { email });
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format'
+      });
+    }
+
+    try {
+      // Check if user exists in Firebase Auth (case-insensitive search)
+      let userRecord;
+      try {
+        userRecord = await admin.auth().getUserByEmail(email);
+      } catch (error) {
+        // If exact match fails, try case-insensitive search in Firestore
+        console.log('Exact email match failed, trying case-insensitive search');
+        const usersSnapshot = await db.collection('users')
+          .where('email', '>=', email.toLowerCase())
+          .where('email', '<=', email.toLowerCase() + '\uf8ff')
+          .get();
+        
+        if (usersSnapshot.empty) {
+          // Don't reveal if user exists or not for security
+          return res.json({
+            success: true,
+            message: 'If an account exists with this email, a password reset link has been sent.'
+          });
+        }
+        
+        // Find exact case-insensitive match
+        const matchingUser = usersSnapshot.docs.find(doc => 
+          doc.data().email.toLowerCase() === email.toLowerCase()
+        );
+        
+        if (!matchingUser) {
+          return res.json({
+            success: true,
+            message: 'If an account exists with this email, a password reset link has been sent.'
+          });
+        }
+        
+        // Get Firebase Auth user with the correct case
+        userRecord = await admin.auth().getUserByEmail(matchingUser.data().email);
+      }
+
+      if (!userRecord) {
+        // Don't reveal if user exists or not for security
+        return res.json({
+          success: true,
+          message: 'If an account exists with this email, a password reset link has been sent.'
+        });
+      }
+
+      // Generate password reset link using Firebase Auth
+      const resetLink = await admin.auth().generatePasswordResetLink(userRecord.email);
+      
+      console.log('✅ Password reset link generated:', resetLink);
+      
+      // In production, you would send this link via email using a service like SendGrid, AWS SES, etc.
+      // For now, we'll log it and return success
+      
+      // TODO: Integrate with email service
+      // Example with SendGrid:
+      // await sendEmail({
+      //   to: userRecord.email,
+      //   subject: 'Password Reset Request',
+      //   html: `Click here to reset your password: ${resetLink}`
+      // });
+
+      console.log('📧 Password reset link (for testing):', resetLink);
+
+      res.json({
+        success: true,
+        message: 'If an account exists with this email, a password reset link has been sent.',
+        // In development only - remove in production
+        resetLink: process.env.NODE_ENV === 'development' ? resetLink : undefined
+      });
+
+    } catch (error) {
+      console.error('Error generating password reset link:', error);
+      
+      // Return generic success message for security
+      res.json({
+        success: true,
+        message: 'If an account exists with this email, a password reset link has been sent.'
+      });
+    }
+
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'An error occurred. Please try again later.' 
+    });
+  }
+});
+
 module.exports = router;
