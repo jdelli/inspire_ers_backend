@@ -861,6 +861,21 @@ router.post('/report', async (req, res) => {
 
     console.log(`📊 Filtered to ${filteredRecords.length} records matching criteria`);
 
+    // Fetch holidays in range for overlay
+    let holidaysInRange = [];
+    try {
+      const holidaysSnap = await db
+        .collection('companyHolidays')
+        .where('companyId', '==', companyId)
+        .where('date', '>=', startDate)
+        .where('date', '<=', endDate)
+        .get();
+      holidaysInRange = holidaysSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      console.log(`🎉 Found ${holidaysInRange.length} holidays in range`);
+    } catch (e) {
+      console.warn('⚠️ Failed to fetch holidays for overlay:', e?.message || e);
+    }
+
     if (filteredRecords.length === 0) {
       await logActivitySafe({
         module: 'hr',
@@ -904,6 +919,16 @@ router.post('/report', async (req, res) => {
 
     for (const [empId, records] of Object.entries(employeeRecords)) {
       const summary = calculateEmployeeSummary(empId, records, startDate, endDate, companyId);
+
+      // Overlay holidays: add holidayDays for all, presentDays for payable
+      const holidayCount = holidaysInRange.length;
+      const payableCount = holidaysInRange.filter((h) => h.payable === true).length;
+      summary.holidayDays = (summary.holidayDays || 0) + holidayCount;
+      summary.presentDays = (summary.presentDays || 0) + payableCount;
+
+      // Attach applied holidays for audit/exports if needed
+      summary.appliedHolidays = holidaysInRange.map((h) => ({ date: h.date, name: h.name, payable: !!h.payable }));
+
       summaries.push(summary);
 
       // Save summary to attendanceSummaries collection
@@ -1109,6 +1134,16 @@ router.post('/generateAttendanceReport', async (req, res) => {
 
     for (const [empId, records] of Object.entries(employeeRecords)) {
       const summary = calculateEmployeeSummary(empId, records, startDate, endDate, companyId);
+
+      // Overlay holidays: add holidayDays for all, presentDays for payable
+      const holidayCount = holidaysInRange.length;
+      const payableCount = holidaysInRange.filter((h) => h.payable === true).length;
+      summary.holidayDays = (summary.holidayDays || 0) + holidayCount;
+      summary.presentDays = (summary.presentDays || 0) + payableCount;
+
+      // Attach applied holidays for audit/exports if needed
+      summary.appliedHolidays = holidaysInRange.map((h) => ({ date: h.date, name: h.name, payable: !!h.payable }));
+
       summaries.push(summary);
 
       // Save summary to attendanceSummaries collection
