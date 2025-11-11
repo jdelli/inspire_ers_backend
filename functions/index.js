@@ -16,7 +16,8 @@ const firestoreFunctions = require('./src/api/firestoreFunctions');
 const auditFunctions = require('./src/api/auditFunctions');
 const payslipFunctions = require('./src/api/payslipFunctions');
 const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
-const adminFunctions = require('./src/api/adminFunctions');
+
+const pettyCashFunctions = require('./src/api/pettyCashFunctions');
 const taxService = require('./src/services/taxService');
 const payrollService = require('./src/services/payrollService');
 const commissionService = require('./src/services/commissionService');
@@ -85,7 +86,8 @@ app.use('/employees', employeeFunctions);
 app.use('/files', requireAuthenticatedUser, fileFunctions);
 app.use('/firestore', requireAuthenticatedUser, firestoreFunctions);
 app.use('/audit', requireAuditAccess, auditFunctions);
-app.use('/payslips', payslipFunctions);
+
+app.use('/pettycash', requireAuthenticatedUser, pettyCashFunctions);
 app.use('/admin', adminFunctions);
 
 exports.api = functions.https.onRequest(app);
@@ -309,3 +311,4 @@ exports.calculate13thMonthPay = functions.https.onCall(async (data, context) => 
     throw new functions.https.HttpsError(code, error.message || 'Failed to calculate 13th month pay.', error.details);
   }
 });
+

@@ -19,7 +19,8 @@ const payslipFunctions = require('./src/api/payslipFunctions');
 const fileFunctions = require('./src/api/fileFunctions');
 const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
 const adminFunctions = require('./src/api/adminFunctions');
-const auditFunctions = require('./src/api/auditFunctions');
+
+const pettyCashFunctions = require('./src/api/pettyCashFunctions');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -73,6 +74,7 @@ app.use(`${BASE}/employees`, employeeFunctions);
 app.use(`${BASE}/files`, fileFunctions);
 app.use(`${BASE}/trainee-payroll`, traineePayrollFunctions);
 app.use(`${BASE}/admin`, adminFunctions);
+app.use(`${BASE}/pettycash`, requireAuthenticatedUser, pettyCashFunctions);
 app.use(`${BASE}/payslips`, payslipFunctions);
 app.use(`${BASE}/audit`, auditFunctions);
 
@@ -98,4 +100,5 @@ process.on('SIGTERM', () => {
   console.log('Shutting down server...');
   process.exit(0);
 });
+
 
