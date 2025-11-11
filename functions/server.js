@@ -19,6 +19,7 @@ const payslipFunctions = require('./src/api/payslipFunctions');
 const fileFunctions = require('./src/api/fileFunctions');
 const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
 const adminFunctions = require('./src/api/adminFunctions');
+const auditFunctions = require('./src/api/auditFunctions');
 
 const pettyCashFunctions = require('./src/api/pettyCashFunctions');
 
