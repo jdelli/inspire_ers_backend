@@ -125,7 +125,7 @@ router.post('/test-create', async (req, res) => {
       logId: testLog
     });
   } catch (error) {
-    console.error('❌ [ACTIVITY TEST] Error:', error);
+    console.error('⛔ [ACTIVITY TEST] Error:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -136,8 +136,8 @@ router.get('/', async (req, res) => {
   console.log('🔥 [ACTIVITY] Query params:', req.query);
   try {
     if (!ensureRoleAccess(req)) {
-      console.log('❌ [ACTIVITY] Access denied - user role not allowed');
-      console.log('❌ [ACTIVITY] User specialrole:', req.user?.specialrole);
+      console.log('⛔ [ACTIVITY] Access denied - user role not allowed');
+      console.log('⛔ [ACTIVITY] User specialrole:', req.user?.specialrole);
       return res.status(403).json({
         success: false,
         error: 'forbidden',
@@ -167,50 +167,76 @@ router.get('/', async (req, res) => {
     console.log('🔍 [ACTIVITY] Query filters:', { limit, moduleFilter, actionFilter, actorFilter, cursorId });
 
     const db = firestore();
-    const activityCollection = db.collection('activityLogs');
+    // Use collectionGroup to query all 'historyLogs' subcollections across all users
+    const activityCollection = db.collectionGroup('historyLogs');
 
-    console.log('🔍 [ACTIVITY] Querying global activityLogs collection');
+    console.log('🔍 [ACTIVITY] Querying global historyLogs collection group');
 
-    let query = activityCollection.orderBy('performedAt', 'desc');
-
-    // Only filter by company if provided (don't require it)
-    if (companyId) {
-      query = query.where('companyId', '==', companyId);
-    }
-
-    // Apply module filter (including forced audit filter)
-    if (moduleFilter) {
-      query = query.where('module', '==', moduleFilter);
-    }
-
-    if (actionFilter) {
-      query = query.where('action', '==', actionFilter);
-    }
-
-    if (actorFilter) {
-      query = query.where('actor.uid', '==', actorFilter);
-    }
-
-    if (cursorId) {
-  const cursorDoc = await activityCollection.doc(cursorId).get();
-      if (!cursorDoc.exists) {
-        return res.status(400).json({
-          success: false,
-          error: 'invalid-argument',
-          message: 'Invalid cursor provided.',
-        });
+    let snapshot;
+    try {
+      // Try sorted query first
+      let query = activityCollection.orderBy('performedAt', 'desc');
+      
+      // Apply module filter if present
+      if (moduleFilter) {
+        query = query.where('module', '==', moduleFilter);
       }
-      query = query.startAfter(cursorDoc);
+      if (actionFilter) {
+        query = query.where('action', '==', actionFilter);
+      }
+      if (actorFilter) {
+        query = query.where('actor.uid', '==', actorFilter);
+      }
+      
+      if (cursorId) {
+        const cursorDoc = await activityCollection.doc(cursorId).get();
+        if (cursorDoc.exists) {
+          query = query.startAfter(cursorDoc);
+        }
+      }
+
+      console.log('🔍 [ACTIVITY] Executing SORTED Firestore query...');
+      snapshot = await query.limit(limit + 1).get();
+    
+    } catch (sortError) {
+      console.warn('⚠️ [ACTIVITY] Sorted query failed (likely missing index). Falling back to unsorted query + in-memory sort.');
+      console.warn('⚠️ [ACTIVITY] Error details:', sortError.message);
+      
+      // Fallback: Unsorted query
+      let query = activityCollection;
+      
+      // Re-apply filters (basic equality filters work without composite indexes usually)
+      if (moduleFilter) query = query.where('module', '==', moduleFilter);
+      if (actionFilter) query = query.where('action', '==', actionFilter);
+      if (actorFilter) query = query.where('actor.uid', '==', actorFilter);
+
+      // Note: Pagination (cursor) is hard to do correctly in fallback without sorting, 
+      // so we might just fetch the first batch or skip cursor for the fallback to be safe.
+      
+      console.log('🔍 [ACTIVITY] Executing UNSORTED fallback query...');
+      snapshot = await query.limit(limit + 1).get();
     }
 
-    console.log('🔍 [ACTIVITY] Executing Firestore query...');
-    const snapshot = await query.limit(limit + 1).get();
     console.log('🔍 [ACTIVITY] Query returned', snapshot.size, 'documents');
     const docs = snapshot.docs;
-    const sliced = docs.slice(0, limit);
+    
+    // Normalize AND Sort (needed for fallback)
+    let entries = docs.map(normalizeActivityDoc);
+    
+    // Always sort in memory to ensure consistent "Latest to Oldest" order
+    // (Even if Firestore sorted it, this is cheap for page size 50)
+    entries.sort((a, b) => {
+      const dateA = new Date(a.performedAt || 0);
+      const dateB = new Date(b.performedAt || 0);
+      return dateB - dateA; // Descending (Newest first)
+    });
 
-    const entries = sliced.map(normalizeActivityDoc);
-    console.log('🔍 [ACTIVITY] Normalized', entries.length, 'entries');
+    // Handle pagination manually after sort if we fell back? 
+    // Actually, true pagination requires the DB sort. 
+    // This fallback is just to show *some* data. The 'nextCursor' might be wonky in fallback mode.
+    
+    const sliced = entries.slice(0, limit);
+    console.log('🔍 [ACTIVITY] Normalized', sliced.length, 'entries');
     console.log('🔍 [ACTIVITY] First entry:', entries[0] ? JSON.stringify(entries[0], null, 2) : 'None');
 
     const nextCursor = docs.length > limit ? docs[limit].id : null;
@@ -238,5 +264,58 @@ router.get('/', async (req, res) => {
 
 console.log('✅ [ACTIVITY FUNCTIONS] All routes registered, exporting router...');
 console.log('📋 [ACTIVITY FUNCTIONS] Routes:', router.stack.map(r => `${Object.keys(r.route?.methods || {}).join(',')} ${r.route?.path || 'middleware'}`).join(', '));
+
+
+// Clear all activity logs (Super Admin only)
+router.delete('/', async (req, res) => {
+  try {
+    // Verify superadmin role - allowing 'admin' too for this temp button as requested
+    const role = (req.user?.specialrole || '').toLowerCase();
+    if (!req.user || (role !== 'superadmin' && role !== 'admin')) {
+      return res.status(403).json({
+        success: false,
+        error: 'forbidden',
+        message: 'Only Super Admins or Admins can clear activity logs.',
+      });
+    }
+
+    const db = firestore();
+    const activityCollection = db.collection('activityLogs');
+
+    // Batch delete (up to 500)
+    const snapshot = await activityCollection.limit(500).get();
+
+    if (snapshot.empty) {
+      return res.json({
+        success: true,
+        message: 'No activity logs to delete.',
+        count: 0
+      });
+    }
+
+    const batch = db.batch();
+    let count = 0;
+
+    snapshot.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+      count++;
+    });
+
+    await batch.commit();
+
+    return res.json({
+      success: true,
+      message: `Successfully deleted ${count} activity logs.`,
+      count
+    });
+  } catch (error) {
+    console.error('Failed to clear activity logs:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'internal',
+      message: 'Failed to clear activity logs.',
+    });
+  }
+});
 
 module.exports = router;

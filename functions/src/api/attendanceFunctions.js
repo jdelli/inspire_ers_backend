@@ -3,6 +3,7 @@ const initializeFirebaseAdmin = require('../config/firebase');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const { recordActivity } = require('../services/activityLogService');
+const { getInstance: getMultiFirebaseInstance } = require('../services/multiFirebaseService');
 
 // Configure multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
@@ -251,6 +252,178 @@ async function processBulkAttendance(attendanceRecords) {
 
   return { successCount, errors };
 }
+
+// Sync time records from secondary Firebase (Loopwork) into this project's timeRecords
+router.post('/sync-from-external', async (req, res) => {
+  try {
+    const { companyId, startDate, endDate } = req.body;
+
+    if (!companyId || !startDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters: companyId, startDate',
+      });
+    }
+
+    const effectiveEndDate = endDate || startDate;
+
+    console.log('🔄 Syncing external time records from secondary Firebase:', {
+      companyId,
+      startDate,
+      endDate: effectiveEndDate,
+    });
+
+    // Initialize multi-Firebase service (primary + secondary projects)
+    const multiFirebase = getMultiFirebaseInstance();
+    if (!multiFirebase.initialized) {
+      await multiFirebase.initialize();
+    }
+
+    if (!multiFirebase.isProjectAvailable('secondary')) {
+      return res.status(500).json({
+        success: false,
+        error: 'Secondary Firebase project is not configured or available',
+      });
+    }
+
+    const externalDb = multiFirebase.getFirestore('secondary');
+
+    const companyRef = externalDb.collection('companies').doc(companyId);
+    const employeesSnapshot = await companyRef.collection('employees').get();
+
+    if (employeesSnapshot.empty) {
+      return res.json({
+        success: true,
+        message: 'No employees found in external project for this company',
+        imported: 0,
+      });
+    }
+
+  const batch = db.batch();
+  let importedCount = 0;
+
+  const parseExternalTime = (timeString, ts) => {
+    // Prefer the original string like "09:30:26 AM"
+    if (typeof timeString === 'string' && timeString.trim() !== '') {
+      try {
+        const [timePart, ampmRaw] = timeString.trim().split(' ');
+        const [hStr, mStr] = timePart.split(':');
+        let hours = parseInt(hStr, 10);
+        const minutes = parseInt(mStr, 10) || 0;
+        const ampm = (ampmRaw || '').toUpperCase();
+
+        if (Number.isFinite(hours) && Number.isFinite(minutes)) {
+          if (ampm === 'PM' && hours < 12) hours += 12;
+          if (ampm === 'AM' && hours === 12) hours = 0;
+          return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        }
+      } catch (e) {
+        // Fall back to timestamp below
+      }
+    }
+
+    // Fallback: derive from Firestore timestamp (may be UTC-based)
+    if (ts && typeof ts.toDate === 'function') {
+      const d = ts.toDate();
+      const hours = String(d.getHours()).padStart(2, '0');
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+
+    return null;
+  };
+
+    for (const employeeDoc of employeesSnapshot.docs) {
+      const employeeId = employeeDoc.id;
+
+      const timeRecordsSnapshot = await employeeDoc.ref.collection('timeRecord').get();
+
+      timeRecordsSnapshot.forEach((doc) => {
+        const data = doc.data();
+
+        const dateTimestamp = data.dateTimestamp || data.date;
+        if (!dateTimestamp || typeof dateTimestamp.toDate !== 'function') {
+          return;
+        }
+
+        const dateObj = dateTimestamp.toDate();
+        const dateString = dateObj.toISOString().slice(0, 10);
+
+        // Filter by requested date range (inclusive)
+        if (dateString < startDate || dateString > effectiveEndDate) {
+          return;
+        }
+
+        const timeIn = parseExternalTime(data.timeIn, data.timeInTimestamp || null);
+        const timeOut = parseExternalTime(data.timeOut, data.timeOutTimestamp || null);
+
+        const fullName =
+          data.fullName ||
+          employeeDoc.data().fullName ||
+          `${employeeDoc.data().firstName || ''} ${employeeDoc.data().lastName || ''}`.trim();
+
+        // Calculate time status using existing helper
+        const timeStatus = calculateTimeStatus(timeIn, timeOut, employeeId);
+
+        const attendanceRecord = {
+          employeeId,
+          employeeName: fullName,
+          companyId,
+          date: dateString,
+          timeIn: timeIn || null,
+          timeOut: timeOut || null,
+          status: timeStatus.status || 'Present',
+          notes: '',
+          timeStatus: timeStatus.status,
+          timeStatusColor: timeStatus.color,
+          totalMinutesLate: timeStatus.totalMinutesLate || 0,
+          totalEarlyMinutes: timeStatus.totalEarlyMinutes || 0,
+          totalOvertimeMinutes: timeStatus.totalOvertimeMinutes || 0,
+          totalUndertimeMinutes: timeStatus.totalUndertimeMinutes || 0,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        // Upsert into primary timeRecords collection (avoid duplicates per employee/date/company)
+        const existingRef = db
+          .collection('timeRecords')
+          .doc(`${employeeId}_${dateString}_${companyId}`);
+
+        batch.set(
+          existingRef,
+          {
+            ...attendanceRecord,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        importedCount += 1;
+      });
+    }
+
+    if (importedCount === 0) {
+      return res.json({
+        success: true,
+        message: 'No matching external time records under the specified company and date range',
+        imported: 0,
+      });
+    }
+
+    await batch.commit();
+
+    res.json({
+      success: true,
+      message: `Imported ${importedCount} external time records into timeRecords`,
+      imported: importedCount,
+    });
+  } catch (error) {
+    console.error('❌ Error syncing external time records:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
 
 // Bulk process attendance records
 router.post('/bulk-process', async (req, res) => {

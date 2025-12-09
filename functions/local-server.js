@@ -82,7 +82,10 @@ app.use(`${BASE}/commissions`, requireAuthenticatedUser, commissionFunctions);
 app.use(`${BASE}/reports`, requireAuthenticatedUser, reportFunctions);
 app.use(`${BASE}/reports/v4`, requireAuthenticatedUser, reportFunctionsPhase4);
 app.use(`${BASE}/employee-mgmt`, requireAuthenticatedUser, employeeManagementFunctions);
-app.use(`${BASE}/attendance`, requireAuthenticatedUser, attendanceFunctions);
+// For local development, attendance routes (including sync-from-external)
+// are exposed without auth to simplify testing. In production, auth is enforced
+// via Firebase Functions/server.js.
+app.use(`${BASE}/attendance`, attendanceFunctions);
 app.use(`${BASE}/holidays`, requireAuthenticatedUser, holidayFunctions);
 app.use(`${BASE}/employees`, employeeFunctions);
 app.use(`${BASE}/files`, requireAuthenticatedUser, fileFunctions);

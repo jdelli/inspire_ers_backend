@@ -16,6 +16,7 @@ const firestoreFunctions = require('./src/api/firestoreFunctions');
 const auditFunctions = require('./src/api/auditFunctions');
 const payslipFunctions = require('./src/api/payslipFunctions');
 const traineePayrollFunctions = require('./src/api/traineePayrollFunctions');
+const evaluationFunctions = require('./src/api/evaluationFunctions');
 
 const pettyCashFunctions = require('./src/api/pettyCashFunctions');
 const taxService = require('./src/services/taxService');
@@ -86,6 +87,7 @@ app.use('/employees', employeeFunctions);
 app.use('/files', requireAuthenticatedUser, fileFunctions);
 app.use('/firestore', requireAuthenticatedUser, firestoreFunctions);
 app.use('/audit', requireAuditAccess, auditFunctions);
+app.use(evaluationFunctions); // Handles /tenants/:tenantId/employees/:employeeId/evaluations
 
 app.use('/pettycash', requireAuthenticatedUser, pettyCashFunctions);
 app.use('/admin', adminFunctions);

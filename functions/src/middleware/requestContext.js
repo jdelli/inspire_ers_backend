@@ -90,6 +90,10 @@ const attachRequestContext = async (req, res, next) => {
     }
   }
 
+  // Tenant Context
+  // Set tenantId from authenticated user's companyId or header (if explicitly supported/secure)
+  req.tenantId = req.user?.token?.companyId || req.headers['x-tenant-id'] || null;
+
   return next();
 };
 
