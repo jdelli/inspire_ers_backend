@@ -13,29 +13,26 @@ const getService = async () => {
   return new EmployeeSyncService(multiFirebase);
 };
 
-const employeeSyncService = new EmployeeSyncService(multiFirebase);
-
 // Cache warming on module load (proactive fetch for common data)
 (async () => {
-    try {
-        if (!multiFirebase.initialized) {
-            await multiFirebase.initialize();
-        }
-        console.log('🔥 Warming employee sync cache...');
-        // Fetch with useCache: false to ensure fresh data for warming
-        await employeeSyncService.fetchMergedEmployees({ source: 'all', useCache: false });
-        await employeeSyncService.fetchEmployees('primary', {}, false);
-        console.log('✅ Employee sync cache warmed.');
-    } catch (error) {
-        console.error('⚠️ Failed to warm employee sync cache:', error.message);
-    }
+  try {
+    const service = await getService();
+    console.log('🔥 Warming employee sync cache...');
+    // Fetch with useCache: false to ensure fresh data for warming
+    await service.fetchMergedEmployees({ source: 'all', useCache: false });
+    await service.fetchEmployees('primary', {}, false);
+    console.log('✅ Employee sync cache warmed.');
+  } catch (error) {
+    // Log but don't crash - this is just an optimization
+    console.warn('⚠️ Cache warming: initialization pending or failed (non-critical):', error.message);
+  }
 })();
 
 // GET /api/employees/sync/merged - Get merged employees from all sources
 router.get('/merged', async (req, res) => {
   try {
     const service = await getService();
-    
+
     // Extract options from query parameters
     const options = {
       source: req.query.source || 'all',
@@ -67,7 +64,7 @@ router.get('/status', async (req, res) => {
     if (!multiFirebase.initialized) {
       await multiFirebase.initialize();
     }
-    
+
     const status = multiFirebase.getAllConnectionStatus();
     res.json(status);
   } catch (error) {
@@ -86,10 +83,10 @@ router.get('/test-connection', async (req, res) => {
     if (!multiFirebase.initialized) {
       await multiFirebase.initialize();
     }
-    
+
     const isHealthy = await multiFirebase.healthCheck('secondary');
     const status = multiFirebase.getConnectionStatus('secondary');
-    
+
     res.json({
       healthy: isHealthy,
       status: status
@@ -108,13 +105,13 @@ router.post('/refresh/:projectKey', async (req, res) => {
   try {
     const { projectKey } = req.params;
     const service = await getService();
-    
+
     if (projectKey === 'all') {
       service.clearCache();
     } else {
       service.clearCache(projectKey);
     }
-    
+
     res.json({
       message: `Cache cleared for ${projectKey}`,
       timestamp: new Date().toISOString()
@@ -133,7 +130,7 @@ router.get('/:projectKey', async (req, res) => {
   try {
     const { projectKey } = req.params;
     const service = await getService();
-    
+
     // Validate projectKey
     if (!['primary', 'secondary'].includes(projectKey)) {
       return res.status(400).json({
@@ -149,7 +146,7 @@ router.get('/:projectKey', async (req, res) => {
       department: req.query.department,
       limit: req.query.limit ? parseInt(req.query.limit) : undefined
     };
-    
+
     const useCache = req.query.useCache !== 'false'; // Default to true
 
     const employees = await service.fetchEmployees(projectKey, filters, useCache);
