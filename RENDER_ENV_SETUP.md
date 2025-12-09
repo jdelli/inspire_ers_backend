@@ -40,6 +40,10 @@ Open the downloaded `serviceAccountKey.json` and find these values:
 | `FIREBASE_PROJECT_ID` | Project ID from JSON | `inspire-ers-12345` |
 | `FIREBASE_CLIENT_EMAIL` | Client email from JSON | `firebase-adminsdk-abc@inspire-ers.iam.gserviceaccount.com` |
 | `FIREBASE_PRIVATE_KEY` | **Entire** private key from JSON | `-----BEGIN PRIVATE KEY-----\nMII...AAA=\n-----END PRIVATE KEY-----\n` |
+| `SECONDARY_FIREBASE_ENABLED` | Set to `true` to enable secondary sync | `true` |
+| `SECONDARY_FIREBASE_PROJECT_ID` | Secondary Project ID from JSON | `your-secondary-project-id` |
+| `SECONDARY_FIREBASE_CLIENT_EMAIL` | Secondary Client email from JSON | `firebase-adminsdk-secondary@your-secondary-project-id.iam.gserviceaccount.com` |
+| `SECONDARY_FIREBASE_PRIVATE_KEY` | **Entire** private key from JSON | `-----BEGIN PRIVATE KEY-----\nMII...AAA=\n-----END PRIVATE KEY-----\n` |
 | `JWT_SECRET` | Random secure string | `super-secret-jwt-key-12345` |
 | `NODE_ENV` | `production` | `production` |
 
@@ -55,6 +59,22 @@ Open the downloaded `serviceAccountKey.json` and find these values:
 - Use a long, random string
 - Generate one with: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`
 - Never use the default `your-secret-key-change-in-production`
+
+### Secondary Firebase Configuration (Optional)
+
+If you intend to use the multi-project employee sync feature, you will also need to configure environment variables for your secondary Firebase project.
+
+Follow "Step 1: Get Firebase Credentials" and "Step 2: Extract Values from JSON" for your **secondary** Firebase project. Then add the following variables in Render:
+
+| Key | Value | Example |
+|-----|-------|---------|
+| `SECONDARY_FIREBASE_ENABLED` | Set to `true` to enable secondary sync | `true` |
+| `SECONDARY_FIREBASE_PROJECT_ID` | Project ID from secondary JSON | `your-secondary-project-id` |
+| `SECONDARY_FIREBASE_CLIENT_EMAIL` | Client email from secondary JSON | `firebase-adminsdk-secondary@your-secondary-project-id.iam.gserviceaccount.com` |
+| `SECONDARY_FIREBASE_PRIVATE_KEY` | **Entire** private key from secondary JSON | `-----BEGIN PRIVATE KEY-----\nMII...AAA=\n-----END PRIVATE KEY-----\n` |
+
+**Important Note for SECONDARY_FIREBASE_PRIVATE_KEY:**
+- Similar to the primary key, copy the ENTIRE value including `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` and keep the `\n` characters.
 
 ### Step 5: Redeploy
 
@@ -107,6 +127,10 @@ For Render Environment Variables:
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY=
+SECONDARY_FIREBASE_ENABLED=false
+SECONDARY_FIREBASE_PROJECT_ID=
+SECONDARY_FIREBASE_CLIENT_EMAIL=
+SECONDARY_FIREBASE_PRIVATE_KEY=
 JWT_SECRET=
 NODE_ENV=production
 ```
